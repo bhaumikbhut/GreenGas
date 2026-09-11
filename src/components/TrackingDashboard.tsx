@@ -147,7 +147,6 @@ export default function TrackingDashboard() {
       if (!q) return true;
       return (
         t.plate.toLowerCase().includes(q) ||
-        t.imei.toLowerCase().includes(q) ||
         t.name.toLowerCase().includes(q) ||
         t.productLine.toLowerCase().includes(q)
       );
@@ -270,7 +269,7 @@ export default function TrackingDashboard() {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search plate or IMEI"
+          placeholder="Search plate"
           enterKeyHint="search"
           autoCapitalize="characters"
           className="w-full rounded-xl border border-[var(--gg-line)] bg-[var(--gg-bg)] py-3 pl-3 pr-10 text-base outline-none transition placeholder:text-[#8a988c] focus:border-[var(--gg-green)] sm:py-2.5 sm:text-sm"
