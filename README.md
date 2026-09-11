@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Green Gas Fleet Tracker
 
-## Getting Started
+Live truck map + auto status from ProTrack (portal bridge) + WhatsApp alerts.
 
-First, run the development server:
+**Pilot production:** always-on deploy is supported; GPS uses the ProTrack website bridge and alerts use personal WhatsApp (QR link). Long-term production should move to Open API + WhatsApp Business API.
+
+## Accounts
+
+| Product | Portal account |
+|---------|----------------|
+| LPG | `GGLPG` |
+| Propane | `GG11` |
+
+## Local setup
+
+1. Copy `.env.example` to `.env.local` and fill passwords.
+2. `GPS_SOURCE=portal` (default).
+3. `npm install && npm run dev` → http://localhost:3000
+4. Link WhatsApp at http://localhost:3000/whatsapp-link (scan QR once).
+
+## Status rules (no driver input)
+
+- Enter 500 m of a loading pin → `LOADING` → WhatsApp
+- Leave that zone (2 polls) → `RELEASED` → WhatsApp
+- Otherwise `ON_ROAD` / `OFFLINE`
+
+## GPS source
+
+- **portal** (current): logs into protrack365.com for both accounts and reads live positions
+- **openapi**: official API (needs dealer enable; error 10007 until then)
+
+## WhatsApp
+
+| Provider | Use |
+|----------|-----|
+| `personal` | QR link at `/whatsapp-link` (testing / pilot) |
+| `meta` | WhatsApp Business Cloud API |
+| `callmebot` | Personal free API (often full) |
+| `dry-run` | Log only |
+
+## Production (Railway)
+
+1. Docker image builds from [Dockerfile](Dockerfile).
+2. Mount a **persistent volume** at `/app/.data` (truck status + WhatsApp auth session).
+3. Set env vars from `.env.example` (never commit secrets).
+4. Health check: `GET /api/health`
+5. After first deploy, open `https://<your-host>/whatsapp-link` and scan QR again (local session does not carry over).
+
+Required env:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+GPS_SOURCE=portal
+PROTRACK_ACCOUNT_LPG=...
+PROTRACK_PASSWORD_LPG=...
+PROTRACK_ACCOUNT_PROPANE=...
+PROTRACK_PASSWORD_PROPANE=...
+PROTRACK_PORTAL_URL=https://www.protrack365.com
+PROTRACK_GPSDATA_URL=https://real.gpscenter.xyz
+GEOFENCE_RADIUS_M=500
+WHATSAPP_PROVIDER=personal
+WHATSAPP_TO=91XXXXXXXXXX
 ```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.

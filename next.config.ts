@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  serverExternalPackages: [
+    "@whiskeysockets/baileys",
+    "pino",
+    "qrcode",
+    "jimp",
+    "@hapi/boom",
+  ],
 };
 
 export default nextConfig;
