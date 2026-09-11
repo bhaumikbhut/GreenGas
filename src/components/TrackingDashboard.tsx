@@ -176,12 +176,6 @@ export default function TrackingDashboard() {
             LPG {data?.productCounts?.LPG ?? 0} · Propane{" "}
             {data?.productCounts?.PROPANE ?? 0}
           </span>
-          <span>GPS: {data?.gpsSource || "…"}</span>
-          <span>
-            Store: {data?.statusStore || "…"}
-            {data?.statusStore === "ephemeral" ? " (prod needs KV)" : ""}
-          </span>
-          <span>Radius {data?.radiusM ?? 500} m</span>
           <span>
             {data?.fetchedAt
               ? `Updated ${new Date(data.fetchedAt).toLocaleTimeString()}`
