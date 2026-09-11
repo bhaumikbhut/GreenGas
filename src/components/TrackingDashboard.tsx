@@ -26,6 +26,9 @@ type ApiResponse = {
   loadingPoints: LoadingPoint[];
   factoryPoints?: FactoryPoint[];
   factoryCount?: number;
+  statusStore?: string;
+  statusCounts?: Record<string, number>;
+  statusCountTotal?: number;
   error?: string;
   whatsappConfigured?: boolean;
   gpsSource?: string;
@@ -122,6 +125,15 @@ export default function TrackingDashboard() {
   }, [trucks, query, statusFilter, productFilter]);
 
   const counts = useMemo(() => {
+    if (data?.statusCounts) {
+      return {
+        LOADING: data.statusCounts.LOADING ?? 0,
+        LOADED: data.statusCounts.LOADED ?? 0,
+        AT_FACTORY: data.statusCounts.AT_FACTORY ?? 0,
+        EMPTY: data.statusCounts.EMPTY ?? 0,
+        OFFLINE: data.statusCounts.OFFLINE ?? 0,
+      };
+    }
     const c: Record<string, number> = {
       LOADING: 0,
       LOADED: 0,
@@ -130,20 +142,20 @@ export default function TrackingDashboard() {
       OFFLINE: 0,
     };
     for (const t of trucks) {
-      // Exactly one status bucket per truck
       if (c[t.status] != null) c[t.status] += 1;
       else c.EMPTY += 1;
     }
     return c;
-  }, [trucks]);
+  }, [trucks, data?.statusCounts]);
   const countTotal = useMemo(
     () =>
+      data?.statusCountTotal ??
       counts.LOADING +
-      counts.LOADED +
-      counts.AT_FACTORY +
-      counts.EMPTY +
-      counts.OFFLINE,
-    [counts],
+        counts.LOADED +
+        counts.AT_FACTORY +
+        counts.EMPTY +
+        counts.OFFLINE,
+    [counts, data?.statusCountTotal],
   );
 
   return (
@@ -165,6 +177,10 @@ export default function TrackingDashboard() {
             {data?.productCounts?.PROPANE ?? 0}
           </span>
           <span>GPS: {data?.gpsSource || "…"}</span>
+          <span>
+            Store: {data?.statusStore || "…"}
+            {data?.statusStore === "ephemeral" ? " (prod needs KV)" : ""}
+          </span>
           <span>Radius {data?.radiusM ?? 500} m</span>
           <span>
             {data?.fetchedAt

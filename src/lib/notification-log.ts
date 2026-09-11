@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { dataDir } from "./data-dir";
+import { getRedis, NOTIF_LIST_KEY } from "./kv";
 
 const LOG_FILE = () => path.join(dataDir(), "notifications.json");
 
@@ -33,6 +34,13 @@ export async function appendNotification(
     message: entry.message,
   };
 
+  const redis = getRedis();
+  if (redis) {
+    await redis.lpush(NOTIF_LIST_KEY, full);
+    await redis.ltrim(NOTIF_LIST_KEY, 0, 199);
+    return full;
+  }
+
   let list: NotificationLog[] = [];
   try {
     list = JSON.parse(await fs.readFile(LOG_FILE(), "utf8")) as NotificationLog[];
@@ -47,6 +55,14 @@ export async function appendNotification(
 }
 
 export async function readNotifications(limit = 50): Promise<NotificationLog[]> {
+  const redis = getRedis();
+  if (redis) {
+    const rows = await redis.lrange<NotificationLog>(NOTIF_LIST_KEY, 0, limit - 1);
+    return (rows || []).map((row) =>
+      typeof row === "string" ? (JSON.parse(row) as NotificationLog) : row,
+    );
+  }
+
   try {
     const list = JSON.parse(
       await fs.readFile(LOG_FILE(), "utf8"),

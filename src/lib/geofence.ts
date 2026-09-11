@@ -77,7 +77,15 @@ export function findNearestFactoryPoint(
   lng: number,
   radiusM: number,
 ): { point: FactoryPoint; distanceM: number } | null {
-  return nearestIn(FACTORY_POINTS, lat, lng, radiusM);
+  let best: { point: FactoryPoint; distanceM: number } | null = null;
+  for (const point of FACTORY_POINTS) {
+    const r = point.radiusM && point.radiusM > 0 ? point.radiusM : radiusM;
+    const distanceM = haversineMeters(lat, lng, point.lat, point.lng);
+    if (distanceM <= r && (!best || distanceM < best.distanceM)) {
+      best = { point, distanceM };
+    }
+  }
+  return best;
 }
 
 export function normalizeMemory(

@@ -23,7 +23,13 @@
 # misc
 .DS_Store
 *.pem
+*.xlsx
+*.xls
+
+# local runtime / GPS + WhatsApp session state
 .data/
+.tmp/
+/tmp/
 
 # debug
 npm-debug.log*
@@ -31,12 +37,17 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — keep only the template in git
 .env*
 !.env.example
 
-# vercel
+# vercel / local deploy artifacts
 .vercel
+
+# Cursor / agent skill installs (not app source)
+.agents/
+skills-lock.json
+.cursor/
 
 # typescript
 *.tsbuildinfo

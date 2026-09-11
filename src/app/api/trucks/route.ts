@@ -305,6 +305,19 @@ export async function GET(request: Request) {
     ? trucks.filter((t) => t.imei === imeiFilter)
     : trucks;
 
+  const statusCounts = {
+    LOADING: 0,
+    LOADED: 0,
+    AT_FACTORY: 0,
+    EMPTY: 0,
+    OFFLINE: 0,
+  };
+  for (const t of trucks) {
+    if (t.status in statusCounts) {
+      statusCounts[t.status as keyof typeof statusCounts] += 1;
+    }
+  }
+
   const lpgCount = trucks.filter((t) => t.productLine === "LPG").length;
   const propaneCount = trucks.filter((t) => t.productLine === "PROPANE").length;
 
@@ -313,8 +326,16 @@ export async function GET(request: Request) {
     fetchedAt: new Date().toISOString(),
     radiusM: r,
     gpsSource: sourceUsed,
+    statusStore: (await import("@/lib/status-store")).statusStoreMode(),
     accountsUsed,
     productCounts: { LPG: lpgCount, PROPANE: propaneCount },
+    statusCounts,
+    statusCountTotal:
+      statusCounts.LOADING +
+      statusCounts.LOADED +
+      statusCounts.AT_FACTORY +
+      statusCounts.EMPTY +
+      statusCounts.OFFLINE,
     whatsappConfigured: whatsappConfigured(),
     factoryCount: FACTORY_POINTS.length,
     errors,

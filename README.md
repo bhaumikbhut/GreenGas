@@ -21,15 +21,16 @@ Live truck map + auto status from ProTrack (portal bridge) + WhatsApp alerts via
 ```text
 EMPTY  → enter port 500m     → LOADING
 LOADING → leave port         → LOADED   (filled, on road to factory)
-LOADED → enter factory 500m  → AT_FACTORY
+LOADED → enter factory       → AT_FACTORY
 AT_FACTORY → leave factory   → EMPTY    (empty, on road)
 ```
 
 - **LOADING** only while at a port pin  
 - On road: **LOADED** (filled) or **EMPTY**  
 - WhatsApp on each transition + **live track link** (`/track/<imei>`) + map pin  
-- Add factory coordinates in `src/lib/factory-points.ts` (or share Maps links)
-- Set `APP_PUBLIC_URL` to your Vercel domain so WhatsApp links open the live page
+- Factory unload hubs: `src/lib/factory-points.ts`  
+- Set `APP_PUBLIC_URL` for WhatsApp live-track links  
+- Production status memory: **Upstash Redis** (`KV_REST_API_URL` / `KV_REST_API_TOKEN`)
 
 ## GPS source
 
@@ -44,16 +45,15 @@ Required in `.env.local`:
 WHATSAPP_TO=91XXXXXXXXXX
 WHATSAPP_TOKEN=...
 WHATSAPP_PHONE_NUMBER_ID=...
-# Optional: approved template (needed for first outbound messages outside 24h window)
+# Optional approved template (needed for outbound outside 24h window)
 WHATSAPP_TEMPLATE_NAME=
 WHATSAPP_TEMPLATE_LANG=en
 ```
 
 Create an app in [Meta for Developers](https://developers.facebook.com/), add WhatsApp, then paste the permanent token and phone number ID.
 
-## Deploy notes
+## Deploy
 
-- **Local production:** `npm run build && npm run start` → http://localhost:3000
-- **Cloud (Vercel):** https://green-gas-sigma.vercel.app — free serverless. Truck status files use `/tmp` (may reset between cold starts; fine for map viewing, can re-alert until Meta is configured carefully).
-- Health check: `GET /api/health`
-- Set `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_NUMBER_ID` in Vercel project env when Meta is ready.
+- **Local:** `npm run build && npm run start` → http://localhost:3000  
+- **Production:** https://green-gas-sigma.vercel.app  
+- Health: `GET /api/health`  

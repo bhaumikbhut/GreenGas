@@ -119,7 +119,7 @@ export default function TruckMap({
         <Circle
           key={p.id}
           center={[p.lat, p.lng]}
-          radius={radiusM}
+          radius={p.radiusM ?? radiusM}
           pathOptions={{
             color: "#7c3aed",
             fillColor: "#7c3aed",
@@ -138,7 +138,7 @@ export default function TruckMap({
               </>
             ) : null}
             <br />
-            Radius: {radiusM} m
+            Radius: {p.radiusM ?? radiusM} m
           </Popup>
         </Circle>
       ))}
