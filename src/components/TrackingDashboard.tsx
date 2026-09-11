@@ -123,20 +123,6 @@ export default function TrackingDashboard() {
       const res = await fetch("/api/trucks", { cache: "no-store" });
       const json = (await res.json()) as ApiResponse;
       setData(json);
-
-      // Hobby plan: server `after()` often can't finish a 25s ProTrack pull.
-      // If snapshot is stale, kick a live refresh from the browser (keeps the
-      // request alive) and update UI when it completes.
-      const age = json.cache?.ageSec;
-      if (typeof age === "number" && age > 45) {
-        void fetch("/api/trucks?live=1", { cache: "no-store" })
-          .then(async (liveRes) => {
-            if (!liveRes.ok) return;
-            const live = (await liveRes.json()) as ApiResponse;
-            if (live.trucks?.length) setData(live);
-          })
-          .catch(() => {});
-      }
     } catch (err) {
       setData({
         ok: false,
@@ -150,11 +136,39 @@ export default function TrackingDashboard() {
     }
   }, []);
 
+  /** Full ProTrack pull — keeps Redis snapshot fresh while the tab is open. */
+  const refreshLive = useCallback(async () => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return;
+    }
+    try {
+      const res = await fetch("/api/trucks?live=1", { cache: "no-store" });
+      if (!res.ok) return;
+      const json = (await res.json()) as ApiResponse;
+      if (json.trucks?.length) setData(json);
+    } catch {
+      // Keep last good cache on screen
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
-    const id = setInterval(() => void refresh(), 30000);
-    return () => clearInterval(id);
-  }, [refresh]);
+    const fast = setInterval(() => void refresh(), 30000);
+    // ProTrack takes ~25s; run a live pull about once a minute while tab is open
+    const live = setInterval(() => void refreshLive(), 60000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshLive();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    // Kick one live pull shortly after first paint if cache is already stale
+    const boot = setTimeout(() => void refreshLive(), 2000);
+    return () => {
+      clearInterval(fast);
+      clearInterval(live);
+      clearTimeout(boot);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refresh, refreshLive]);
 
   const trucks = useMemo(() => data?.trucks ?? [], [data]);
   const filtered = useMemo(() => {
