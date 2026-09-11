@@ -34,6 +34,11 @@ type ApiResponse = {
   gpsSource?: string;
   accountsUsed?: string[];
   productCounts?: { LPG: number; PROPANE: number };
+  cache?: {
+    hit: boolean;
+    ageSec: number | null;
+    refreshedAt: string | null;
+  };
   alerts?: Array<{
     plate: string;
     status: string;
@@ -118,6 +123,20 @@ export default function TrackingDashboard() {
       const res = await fetch("/api/trucks", { cache: "no-store" });
       const json = (await res.json()) as ApiResponse;
       setData(json);
+
+      // Hobby plan: server `after()` often can't finish a 25s ProTrack pull.
+      // If snapshot is stale, kick a live refresh from the browser (keeps the
+      // request alive) and update UI when it completes.
+      const age = json.cache?.ageSec;
+      if (typeof age === "number" && age > 45) {
+        void fetch("/api/trucks?live=1", { cache: "no-store" })
+          .then(async (liveRes) => {
+            if (!liveRes.ok) return;
+            const live = (await liveRes.json()) as ApiResponse;
+            if (live.trucks?.length) setData(live);
+          })
+          .catch(() => {});
+      }
     } catch (err) {
       setData({
         ok: false,

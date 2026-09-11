@@ -22,6 +22,11 @@ type ApiResponse = {
   radiusM?: number;
   trucks: TruckSnapshot[];
   error?: string;
+  cache?: {
+    hit: boolean;
+    ageSec: number | null;
+    refreshedAt: string | null;
+  };
 };
 
 export default function LiveTrackClient({ imei }: Props) {
@@ -47,6 +52,27 @@ export default function LiveTrackClient({ imei }: Props) {
       setTruck(match);
       setFetchedAt(json.fetchedAt || new Date().toISOString());
       setError(match ? null : "Truck not found or offline from GPS feed");
+
+      const age = json.cache?.ageSec;
+      if (typeof age === "number" && age > 45) {
+        void fetch(
+          `/api/trucks?imei=${encodeURIComponent(imei)}&live=1`,
+          { cache: "no-store" },
+        )
+          .then(async (liveRes) => {
+            if (!liveRes.ok) return;
+            const live = (await liveRes.json()) as ApiResponse;
+            const liveMatch =
+              live.trucks?.find((t) => t.imei === imei) ||
+              live.trucks?.[0] ||
+              null;
+            if (liveMatch) {
+              setTruck(liveMatch);
+              setFetchedAt(live.fetchedAt || new Date().toISOString());
+            }
+          })
+          .catch(() => {});
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
