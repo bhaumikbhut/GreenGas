@@ -7,7 +7,7 @@ export async function GET() {
     ok: true,
     service: "green-gas-fleet",
     gpsSource: process.env.GPS_SOURCE || "portal",
-    whatsappProvider: process.env.WHATSAPP_PROVIDER || "personal",
+    whatsappProvider: "meta",
     time: new Date().toISOString(),
   });
 }

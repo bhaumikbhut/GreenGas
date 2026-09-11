@@ -4,11 +4,13 @@ import { MapContainer, TileLayer, Circle, Marker, Popup, useMap } from "react-le
 import L from "leaflet";
 import { useEffect } from "react";
 import type { TruckSnapshot } from "@/app/api/trucks/route";
+import type { FactoryPoint } from "@/lib/factory-points";
 import type { LoadingPoint } from "@/lib/loading-points";
 
 type Props = {
   trucks: TruckSnapshot[];
   loadingPoints: LoadingPoint[];
+  factoryPoints: FactoryPoint[];
   radiusM: number;
   selectedImei: string | null;
 };
@@ -17,11 +19,13 @@ function truckIcon(status: string) {
   const color =
     status === "LOADING"
       ? "#c45c26"
-      : status === "RELEASED"
+      : status === "LOADED"
         ? "#1f7a4d"
-        : status === "OFFLINE"
-          ? "#6b7280"
-          : "#1d4f91";
+        : status === "AT_FACTORY"
+          ? "#7c3aed"
+          : status === "OFFLINE"
+            ? "#6b7280"
+            : "#1d4f91"; // EMPTY
   return L.divIcon({
     className: "",
     html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)"></div>`,
@@ -33,10 +37,12 @@ function truckIcon(status: string) {
 function FitBounds({
   trucks,
   loadingPoints,
+  factoryPoints,
   selectedImei,
 }: {
   trucks: TruckSnapshot[];
   loadingPoints: LoadingPoint[];
+  factoryPoints: FactoryPoint[];
   selectedImei: string | null;
 }) {
   const map = useMap();
@@ -53,12 +59,13 @@ function FitBounds({
       if (t.lat != null && t.lng != null) pts.push([t.lat, t.lng]);
     }
     for (const p of loadingPoints) pts.push([p.lat, p.lng]);
+    for (const p of factoryPoints) pts.push([p.lat, p.lng]);
     if (pts.length === 0) {
       map.setView([22.0, 71.0], 7);
       return;
     }
     map.fitBounds(pts, { padding: [40, 40], maxZoom: 11 });
-  }, [map, trucks, loadingPoints, selectedImei]);
+  }, [map, trucks, loadingPoints, factoryPoints, selectedImei]);
 
   return null;
 }
@@ -66,6 +73,7 @@ function FitBounds({
 export default function TruckMap({
   trucks,
   loadingPoints,
+  factoryPoints,
   radiusM,
   selectedImei,
 }: Props) {
@@ -83,6 +91,7 @@ export default function TruckMap({
       <FitBounds
         trucks={trucks}
         loadingPoints={loadingPoints}
+        factoryPoints={factoryPoints}
         selectedImei={selectedImei}
       />
       {loadingPoints.map((p) => (
@@ -100,7 +109,34 @@ export default function TruckMap({
           <Popup>
             <strong>{p.name}</strong>
             <br />
-            Port: {p.port}
+            Port loading
+            <br />
+            Radius: {radiusM} m
+          </Popup>
+        </Circle>
+      ))}
+      {factoryPoints.map((p) => (
+        <Circle
+          key={p.id}
+          center={[p.lat, p.lng]}
+          radius={radiusM}
+          pathOptions={{
+            color: "#7c3aed",
+            fillColor: "#7c3aed",
+            fillOpacity: 0.12,
+            weight: 1,
+          }}
+        >
+          <Popup>
+            <strong>{p.name}</strong>
+            <br />
+            Factory
+            {p.company ? (
+              <>
+                <br />
+                {p.company}
+              </>
+            ) : null}
             <br />
             Radius: {radiusM} m
           </Popup>
@@ -117,12 +153,33 @@ export default function TruckMap({
               <strong>{t.plate}</strong>
               <br />
               {t.productLine} · {t.status}
+              {t.status === "LOADED" || t.status === "AT_FACTORY"
+                ? " · FILLED"
+                : ""}
               <br />
               Speed: {t.speed} km/h
+              {t.lastLoadedFrom ? (
+                <>
+                  <br />
+                  Loaded at: {t.lastLoadedFrom}
+                </>
+              ) : null}
+              {t.lastFactory ? (
+                <>
+                  <br />
+                  Factory: {t.lastFactory}
+                </>
+              ) : null}
               {t.loadingPoint ? (
                 <>
                   <br />
-                  Near: {t.loadingPoint} ({t.distanceM} m)
+                  Near port: {t.loadingPoint} ({t.distanceM} m)
+                </>
+              ) : null}
+              {t.factoryPoint ? (
+                <>
+                  <br />
+                  Near factory: {t.factoryPoint} ({t.distanceM} m)
                 </>
               ) : null}
             </Popup>

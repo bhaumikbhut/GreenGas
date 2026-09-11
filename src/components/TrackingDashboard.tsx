@@ -3,7 +3,9 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TruckSnapshot } from "@/app/api/trucks/route";
+import type { FactoryPoint } from "@/lib/factory-points";
 import type { LoadingPoint } from "@/lib/loading-points";
+import { statusBadge } from "@/lib/status-label";
 
 const TruckMap = dynamic(() => import("@/components/TruckMap"), {
   ssr: false,
@@ -22,6 +24,8 @@ type ApiResponse = {
   truckCount?: number;
   trucks: TruckSnapshot[];
   loadingPoints: LoadingPoint[];
+  factoryPoints?: FactoryPoint[];
+  factoryCount?: number;
   error?: string;
   whatsappConfigured?: boolean;
   gpsSource?: string;
@@ -38,8 +42,9 @@ type ApiResponse = {
 
 const STATUS_STYLE: Record<string, string> = {
   LOADING: "bg-[#f3e0d2] text-[#8a3b12]",
-  RELEASED: "bg-[#d9efe3] text-[#145c38]",
-  ON_ROAD: "bg-[#d9e4f5] text-[#1d4f91]",
+  LOADED: "bg-[#d9efe3] text-[#145c38]",
+  AT_FACTORY: "bg-[#ede9fe] text-[#5b21b6]",
+  EMPTY: "bg-[#d9e4f5] text-[#1d4f91]",
   OFFLINE: "bg-[#eceff3] text-[#4b5563]",
 };
 
@@ -65,6 +70,7 @@ export default function TrackingDashboard() {
         ok: false,
         trucks: [],
         loadingPoints: [],
+        factoryPoints: [],
         error: err instanceof Error ? err.message : "Failed to load trucks",
       });
     } finally {
@@ -116,10 +122,29 @@ export default function TrackingDashboard() {
   }, [trucks, query, statusFilter, productFilter]);
 
   const counts = useMemo(() => {
-    const c = { LOADING: 0, RELEASED: 0, ON_ROAD: 0, OFFLINE: 0 };
-    for (const t of trucks) c[t.status] += 1;
+    const c: Record<string, number> = {
+      LOADING: 0,
+      LOADED: 0,
+      AT_FACTORY: 0,
+      EMPTY: 0,
+      OFFLINE: 0,
+    };
+    for (const t of trucks) {
+      // Exactly one status bucket per truck
+      if (c[t.status] != null) c[t.status] += 1;
+      else c.EMPTY += 1;
+    }
     return c;
   }, [trucks]);
+  const countTotal = useMemo(
+    () =>
+      counts.LOADING +
+      counts.LOADED +
+      counts.AT_FACTORY +
+      counts.EMPTY +
+      counts.OFFLINE,
+    [counts],
+  );
 
   return (
     <div className="flex h-dvh flex-col bg-[#f4f7f4] text-[#1a241a]">
@@ -131,7 +156,10 @@ export default function TrackingDashboard() {
           <h1 className="font-serif text-2xl tracking-tight">Fleet Tracker</h1>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm text-[#d7e8de]">
-          <span>{trucks.length} trucks</span>
+          <span>
+            {trucks.length} trucks
+            {countTotal !== trucks.length ? ` (status sum ${countTotal})` : ""}
+          </span>
           <span>
             LPG {data?.productCounts?.LPG ?? 0} · Propane{" "}
             {data?.productCounts?.PROPANE ?? 0}
@@ -152,12 +180,6 @@ export default function TrackingDashboard() {
           >
             Refresh
           </button>
-          <a
-            href="/whatsapp-link"
-            className="rounded bg-[#075e54] px-3 py-1.5 text-white hover:bg-[#054c44]"
-          >
-            Link WhatsApp
-          </a>
           <button
             type="button"
             disabled={waBusy}
@@ -176,10 +198,13 @@ export default function TrackingDashboard() {
       )}
 
       <div className="border-b border-[#d5e0d5] bg-white px-4 py-2 text-xs text-[#3d4a3d]">
-        WhatsApp:{" "}
+        WhatsApp (Meta):{" "}
         {data?.whatsappConfigured
-          ? "configured — alerts on LOADING / RELEASED"
-          : "not configured yet (set WHATSAPP_* in .env.local)"}
+          ? "configured — alerts on LOADING / LOADED / factory"
+          : "not configured — set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TO"}
+        {data?.factoryCount === 0
+          ? " · add factory map pins to flip LOADED → EMPTY"
+          : ""}
         {data?.alerts?.length
           ? ` · last poll sent ${data.alerts.length} alert(s)`
           : ""}
@@ -203,12 +228,13 @@ export default function TrackingDashboard() {
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[380px_1fr]">
         <aside className="flex min-h-0 flex-col border-r border-[#d5e0d5] bg-white">
           <div className="space-y-3 border-b border-[#e6eee6] p-3">
-            <div className="grid grid-cols-4 gap-2 text-center text-xs">
+            <div className="grid grid-cols-5 gap-1.5 text-center text-[10px]">
               {(
                 [
                   ["LOADING", counts.LOADING],
-                  ["RELEASED", counts.RELEASED],
-                  ["ON_ROAD", counts.ON_ROAD],
+                  ["LOADED", counts.LOADED],
+                  ["AT_FACTORY", counts.AT_FACTORY],
+                  ["EMPTY", counts.EMPTY],
                   ["OFFLINE", counts.OFFLINE],
                 ] as const
               ).map(([key, value]) => (
@@ -218,12 +244,14 @@ export default function TrackingDashboard() {
                   onClick={() =>
                     setStatusFilter((s) => (s === key ? "ALL" : key))
                   }
-                  className={`rounded-md px-1 py-2 ${STATUS_STYLE[key]} ${
+                  className={`rounded-md px-0.5 py-2 ${STATUS_STYLE[key]} ${
                     statusFilter === key ? "ring-2 ring-[#0f2a1f]/40" : ""
                   }`}
                 >
-                  <div className="text-base font-semibold">{value}</div>
-                  <div>{key}</div>
+                  <div className="text-sm font-semibold">{value}</div>
+                  <div className="leading-tight">
+                    {key === "AT_FACTORY" ? "FACTORY" : key}
+                  </div>
                 </button>
               ))}
             </div>
@@ -278,17 +306,32 @@ export default function TrackingDashboard() {
                           {t.plate}
                         </span>
                         <span
-                          className={`rounded px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLE[t.status]}`}
+                          className={`rounded px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLE[t.status] || STATUS_STYLE.EMPTY}`}
                         >
-                          {t.status}
+                          {statusBadge(t.status)}
                         </span>
                       </div>
                       <div className="text-xs text-[#5b6b5b]">
                         {t.productLine} · {t.speed} km/h
-                        {t.online ? "" : " · offline"}
+                        {t.online ? "" : " · GPS offline"}
                       </div>
-                      {t.loadingPoint ? (
-                        <div className="text-xs text-[#1f7a4d]">
+                      {t.status === "LOADED" && t.lastLoadedFrom ? (
+                        <div className="text-xs text-[#145c38]">
+                          Filled at {t.lastLoadedFrom} → factory
+                        </div>
+                      ) : null}
+                      {t.status === "AT_FACTORY" && t.factoryPoint ? (
+                        <div className="text-xs text-[#5b21b6]">
+                          At {t.factoryPoint}
+                        </div>
+                      ) : null}
+                      {t.status === "EMPTY" && t.lastFactory ? (
+                        <div className="text-xs text-[#1d4f91]">
+                          Emptied at {t.lastFactory}
+                        </div>
+                      ) : null}
+                      {t.loadingPoint && t.status === "LOADING" ? (
+                        <div className="text-xs text-[#8a3b12]">
                           {t.loadingPoint} · {t.distanceM} m
                         </div>
                       ) : null}
@@ -304,6 +347,7 @@ export default function TrackingDashboard() {
           <TruckMap
             trucks={filtered}
             loadingPoints={data?.loadingPoints ?? []}
+            factoryPoints={data?.factoryPoints ?? []}
             radiusM={data?.radiusM ?? 500}
             selectedImei={selectedImei}
           />

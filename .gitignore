@@ -24,7 +24,6 @@
 .DS_Store
 *.pem
 .data/
-.data/wa-auth/
 
 # debug
 npm-debug.log*

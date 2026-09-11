@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { FACTORY_POINTS } from "@/lib/factory-points";
 import {
+  findNearestFactoryPoint,
   findNearestLoadingPoint,
   nextStatus,
   type AutoStatus,
@@ -39,8 +41,12 @@ export type TruckSnapshot = {
   online: boolean;
   status: AutoStatus;
   loadingPoint: string | null;
+  factoryPoint: string | null;
   port: string | null;
   distanceM: number | null;
+  cargo: "LOADED" | "EMPTY";
+  lastLoadedFrom: string | null;
+  lastFactory: string | null;
 };
 
 function radiusM(): number {
@@ -48,7 +54,13 @@ function radiusM(): number {
   return Number.isFinite(n) && n > 0 ? n : 500;
 }
 
-const ALERT_STATUSES = new Set<AutoStatus>(["LOADING", "RELEASED"]);
+/** Alert once per transition into these statuses. EMPTY = left factory. */
+const ALERT_STATUSES = new Set<AutoStatus>([
+  "LOADING",
+  "LOADED",
+  "AT_FACTORY",
+  "EMPTY",
+]);
 
 async function loadFromOpenApi(): Promise<{
   devices: ProtrackDevice[];
@@ -104,7 +116,10 @@ async function loadFromPortal(): Promise<{
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const imeiFilter = searchParams.get("imei")?.trim() || null;
+
   const accounts = getConfiguredAccounts();
   if (accounts.length === 0) {
     return NextResponse.json(
@@ -114,6 +129,7 @@ export async function GET() {
           "Missing ProTrack credentials. Set PROTRACK_ACCOUNT_LPG / PROTRACK_ACCOUNT_PROPANE in .env.local",
         trucks: [],
         loadingPoints: LOADING_POINTS,
+        factoryPoints: FACTORY_POINTS,
       },
       { status: 500 },
     );
@@ -170,39 +186,61 @@ export async function GET() {
       Number.isFinite(track.latitude) &&
       Number.isFinite(track.longitude) &&
       !(track.latitude === 0 && track.longitude === 0);
-    const inside =
+
+    const insideLoading =
       track && online && hasFix
         ? findNearestLoadingPoint(track.latitude, track.longitude, r)
         : null;
+    const insideFactory =
+      track && online && hasFix
+        ? findNearestFactoryPoint(track.latitude, track.longitude, r)
+        : null;
+
     const prev = store[device.imei];
     const memory = nextStatus({
       prev,
-      inside,
+      insideLoading,
+      insideFactory,
       online: Boolean(track) && online,
     });
 
-    // Alert on LOADING/RELEASED until a successful WhatsApp was recorded.
-    // Do not require status *change* this poll — otherwise trucks that entered
-    // the zone before WhatsApp was linked never get a message.
+    const prevNotified = String(prev?.lastNotifiedStatus ?? "");
     const shouldAlert =
       ALERT_STATUSES.has(memory.status) &&
+      memory.status !== memory.lastNotifiedStatus &&
       memory.status !== prev?.lastNotifiedStatus &&
-      memory.status !== memory.lastNotifiedStatus;
+      !(memory.status === "LOADED" && prevNotified === "RELEASED") &&
+      // Don't spam EMPTY for trucks that never visited a factory this session
+      !(
+        memory.status === "EMPTY" &&
+        prevNotified !== "AT_FACTORY" &&
+        String(prev?.status ?? "") !== "AT_FACTORY"
+      );
 
     if (shouldAlert) {
       const locationName =
-        inside?.point.name ||
-        (memory.status === "RELEASED"
-          ? "Loading point (departed)"
-          : "Unknown");
+        insideLoading?.point.name ||
+        insideFactory?.point.name ||
+        (memory.status === "LOADED"
+          ? memory.lastLoadedFrom || "Port (departed)"
+          : memory.status === "EMPTY"
+            ? memory.lastFactory || "Factory (departed)"
+            : "Unknown");
+
       const result = await sendWhatsAppAlert({
         plate: device.plate,
         imei: device.imei,
         productLine: device.accountLabel,
-        status: memory.status as "LOADING" | "RELEASED",
+        status: memory.status as
+          | "LOADING"
+          | "LOADED"
+          | "AT_FACTORY"
+          | "EMPTY",
         locationName,
-        port: inside?.point.port ?? null,
+        port: insideLoading?.point.port ?? null,
         when: new Date(),
+        lat: hasFix ? track!.latitude : null,
+        lng: hasFix ? track!.longitude : null,
       });
 
       await appendNotification({
@@ -232,6 +270,11 @@ export async function GET() {
 
     nextStore[device.imei] = memory;
 
+    const near =
+      memory.cargo === "LOADED"
+        ? insideFactory
+        : insideLoading;
+
     trucks.push({
       imei: device.imei,
       plate: device.plate,
@@ -245,14 +288,22 @@ export async function GET() {
       gpstime: track?.gpstime ? track.gpstime * 1000 : null,
       online: Boolean(track) && online,
       status: memory.status,
-      loadingPoint: inside?.point.name ?? null,
-      port: inside?.point.port ?? null,
-      distanceM: inside ? Math.round(inside.distanceM) : null,
+      loadingPoint: insideLoading?.point.name ?? null,
+      factoryPoint: insideFactory?.point.name ?? null,
+      port: insideLoading?.point.port ?? null,
+      distanceM: near ? Math.round(near.distanceM) : null,
+      cargo: memory.cargo,
+      lastLoadedFrom: memory.lastLoadedFrom ?? null,
+      lastFactory: memory.lastFactory ?? null,
     });
   }
 
   await writeTruckStore(nextStore);
   trucks.sort((a, b) => a.plate.localeCompare(b.plate));
+
+  const filtered = imeiFilter
+    ? trucks.filter((t) => t.imei === imeiFilter)
+    : trucks;
 
   const lpgCount = trucks.filter((t) => t.productLine === "LPG").length;
   const propaneCount = trucks.filter((t) => t.productLine === "PROPANE").length;
@@ -265,10 +316,12 @@ export async function GET() {
     accountsUsed,
     productCounts: { LPG: lpgCount, PROPANE: propaneCount },
     whatsappConfigured: whatsappConfigured(),
+    factoryCount: FACTORY_POINTS.length,
     errors,
     alerts,
-    truckCount: trucks.length,
-    trucks,
-    loadingPoints: LOADING_POINTS,
+    truckCount: filtered.length,
+    trucks: filtered,
+    loadingPoints: imeiFilter ? [] : LOADING_POINTS,
+    factoryPoints: imeiFilter ? [] : FACTORY_POINTS,
   });
 }

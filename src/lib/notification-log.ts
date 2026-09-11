@@ -1,8 +1,8 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { dataDir } from "./data-dir";
 
-const DATA_DIR = path.join(process.cwd(), ".data");
-const LOG_FILE = path.join(DATA_DIR, "notifications.json");
+const LOG_FILE = () => path.join(dataDir(), "notifications.json");
 
 export type NotificationLog = {
   id: string;
@@ -35,21 +35,21 @@ export async function appendNotification(
 
   let list: NotificationLog[] = [];
   try {
-    list = JSON.parse(await fs.readFile(LOG_FILE, "utf8")) as NotificationLog[];
+    list = JSON.parse(await fs.readFile(LOG_FILE(), "utf8")) as NotificationLog[];
   } catch {
     list = [];
   }
   list.unshift(full);
   list = list.slice(0, 200);
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(LOG_FILE, JSON.stringify(list, null, 2), "utf8");
+  await fs.mkdir(dataDir(), { recursive: true });
+  await fs.writeFile(LOG_FILE(), JSON.stringify(list, null, 2), "utf8");
   return full;
 }
 
 export async function readNotifications(limit = 50): Promise<NotificationLog[]> {
   try {
     const list = JSON.parse(
-      await fs.readFile(LOG_FILE, "utf8"),
+      await fs.readFile(LOG_FILE(), "utf8"),
     ) as NotificationLog[];
     return list.slice(0, limit);
   } catch {

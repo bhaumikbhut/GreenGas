@@ -1,8 +1,6 @@
 # Green Gas Fleet Tracker
 
-Live truck map + auto status from ProTrack (portal bridge) + WhatsApp alerts.
-
-**Pilot production:** always-on deploy is supported; GPS uses the ProTrack website bridge and alerts use personal WhatsApp (QR link). Long-term production should move to Open API + WhatsApp Business API.
+Live truck map + auto status from ProTrack (portal bridge) + WhatsApp alerts via **Meta Business Cloud API**.
 
 ## Accounts
 
@@ -13,50 +11,49 @@ Live truck map + auto status from ProTrack (portal bridge) + WhatsApp alerts.
 
 ## Local setup
 
-1. Copy `.env.example` to `.env.local` and fill passwords.
+1. Copy `.env.example` to `.env.local` and fill ProTrack + Meta WhatsApp values.
 2. `GPS_SOURCE=portal` (default).
 3. `npm install && npm run dev` → http://localhost:3000
-4. Link WhatsApp at http://localhost:3000/whatsapp-link (scan QR once).
+4. Use **Test WhatsApp** on the dashboard once Meta credentials are set.
 
 ## Status rules (no driver input)
 
-- Enter 500 m of a loading pin → `LOADING` → WhatsApp
-- Leave that zone (2 polls) → `RELEASED` → WhatsApp
-- Otherwise `ON_ROAD` / `OFFLINE`
+```text
+EMPTY  → enter port 500m     → LOADING
+LOADING → leave port         → LOADED   (filled, on road to factory)
+LOADED → enter factory 500m  → AT_FACTORY
+AT_FACTORY → leave factory   → EMPTY    (empty, on road)
+```
+
+- **LOADING** only while at a port pin  
+- On road: **LOADED** (filled) or **EMPTY**  
+- WhatsApp on each transition + **live track link** (`/track/<imei>`) + map pin  
+- Add factory coordinates in `src/lib/factory-points.ts` (or share Maps links)
+- Set `APP_PUBLIC_URL` to your Vercel domain so WhatsApp links open the live page
 
 ## GPS source
 
 - **portal** (current): logs into protrack365.com for both accounts and reads live positions
 - **openapi**: official API (needs dealer enable; error 10007 until then)
 
-## WhatsApp
+## WhatsApp (Meta Cloud API)
 
-| Provider | Use |
-|----------|-----|
-| `personal` | QR link at `/whatsapp-link` (testing / pilot) |
-| `meta` | WhatsApp Business Cloud API |
-| `callmebot` | Personal free API (often full) |
-| `dry-run` | Log only |
-
-## Production (Railway)
-
-1. Docker image builds from [Dockerfile](Dockerfile).
-2. Mount a **persistent volume** at `/app/.data` (truck status + WhatsApp auth session).
-3. Set env vars from `.env.example` (never commit secrets).
-4. Health check: `GET /api/health`
-5. After first deploy, open `https://<your-host>/whatsapp-link` and scan QR again (local session does not carry over).
-
-Required env:
+Required in `.env.local`:
 
 ```bash
-GPS_SOURCE=portal
-PROTRACK_ACCOUNT_LPG=...
-PROTRACK_PASSWORD_LPG=...
-PROTRACK_ACCOUNT_PROPANE=...
-PROTRACK_PASSWORD_PROPANE=...
-PROTRACK_PORTAL_URL=https://www.protrack365.com
-PROTRACK_GPSDATA_URL=https://real.gpscenter.xyz
-GEOFENCE_RADIUS_M=500
-WHATSAPP_PROVIDER=personal
 WHATSAPP_TO=91XXXXXXXXXX
+WHATSAPP_TOKEN=...
+WHATSAPP_PHONE_NUMBER_ID=...
+# Optional: approved template (needed for first outbound messages outside 24h window)
+WHATSAPP_TEMPLATE_NAME=
+WHATSAPP_TEMPLATE_LANG=en
 ```
+
+Create an app in [Meta for Developers](https://developers.facebook.com/), add WhatsApp, then paste the permanent token and phone number ID.
+
+## Deploy notes
+
+- **Local production:** `npm run build && npm run start` → http://localhost:3000
+- **Cloud (Vercel):** https://green-gas-sigma.vercel.app — free serverless. Truck status files use `/tmp` (may reset between cold starts; fine for map viewing, can re-alert until Meta is configured carefully).
+- Health check: `GET /api/health`
+- Set `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_NUMBER_ID` in Vercel project env when Meta is ready.

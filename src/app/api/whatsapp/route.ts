@@ -9,7 +9,7 @@ export async function GET() {
   const logs = await readNotifications(30);
   return NextResponse.json({
     configured: whatsappConfigured(),
-    provider: process.env.WHATSAPP_PROVIDER || "meta",
+    provider: "meta",
     to: process.env.WHATSAPP_TO || "",
     logs,
   });
@@ -25,6 +25,8 @@ export async function POST() {
     locationName: "Dahej A",
     port: "DAHEJ",
     when: new Date(),
+    lat: 21.712,
+    lng: 72.557,
   });
 
   await appendNotification({

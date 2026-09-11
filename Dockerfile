@@ -20,7 +20,7 @@ ENV HOSTNAME=0.0.0.0
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
-  && mkdir -p /app/.data/wa-auth \
+  && mkdir -p /app/.data \
   && chown -R node:node /app
 
 COPY --from=builder /app/public ./public

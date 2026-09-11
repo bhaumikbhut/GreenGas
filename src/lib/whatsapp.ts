@@ -1,16 +1,25 @@
+import { mapsPinLink, liveTrackLink } from "./public-url";
+
 export type WhatsAppAlert = {
   plate: string;
   imei: string;
   productLine: string;
-  status: "LOADING" | "RELEASED" | "ARRIVED";
+  status: "LOADING" | "LOADED" | "AT_FACTORY" | "EMPTY" | "ARRIVED";
   locationName: string;
   port?: string | null;
   when: Date;
+  lat?: number | null;
+  lng?: number | null;
 };
+
+/** @deprecated use mapsPinLink — kept name for clarity in older call sites */
+export function mapsLiveLink(lat: number, lng: number): string {
+  return mapsPinLink(lat, lng);
+}
 
 export type WhatsAppSendResult = {
   ok: boolean;
-  provider: "meta" | "callmebot" | "personal" | "dry-run";
+  provider: "meta";
   to: string[];
   message: string;
   error?: string;
@@ -33,33 +42,76 @@ export function buildAlertText(alert: WhatsAppAlert): string {
   const place = alert.port
     ? `${alert.locationName} (${alert.port})`
     : alert.locationName;
+
   const verb =
     alert.status === "LOADING"
-      ? "reached loading point"
-      : alert.status === "RELEASED"
-        ? "released / left loading point"
-        : "arrived at destination";
+      ? "reached port loading point"
+      : alert.status === "LOADED"
+        ? "left port — LOADED (filled), heading to factory"
+        : alert.status === "AT_FACTORY" || alert.status === "ARRIVED"
+          ? "reached factory"
+          : alert.status === "EMPTY"
+            ? "left factory — EMPTY"
+            : "status update";
 
-  return [
+  const cargoLabel =
+    alert.status === "LOADED" || alert.status === "AT_FACTORY"
+      ? "FILLED"
+      : alert.status === "EMPTY"
+        ? "EMPTY"
+        : alert.status === "LOADING"
+          ? "at port"
+          : "—";
+
+  const lines = [
     `Green Gas alert`,
     `Truck: ${alert.plate}`,
     `Product: ${alert.productLine}`,
     `Status: ${alert.status}`,
+    `Cargo: ${cargoLabel}`,
     `Event: ${verb}`,
     `Location: ${place}`,
     `Time: ${time}`,
-  ].join("\n");
+    `Live track: ${liveTrackLink(alert.imei)}`,
+  ];
+  if (
+    alert.lat != null &&
+    alert.lng != null &&
+    Number.isFinite(alert.lat) &&
+    Number.isFinite(alert.lng)
+  ) {
+    lines.push(`Map pin: ${mapsPinLink(alert.lat, alert.lng)}`);
+  }
+  return lines.join("\n");
 }
 
-async function sendMeta(
-  to: string[],
+export function whatsappConfigured(): boolean {
+  return Boolean(
+    recipients().length &&
+      process.env.WHATSAPP_TOKEN &&
+      process.env.WHATSAPP_PHONE_NUMBER_ID,
+  );
+}
+
+export async function sendWhatsAppAlert(
   alert: WhatsAppAlert,
-  text: string,
 ): Promise<WhatsAppSendResult> {
+  const to = recipients();
+  const text = buildAlertText(alert);
   const token = process.env.WHATSAPP_TOKEN;
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   const template = process.env.WHATSAPP_TEMPLATE_NAME;
   const lang = process.env.WHATSAPP_TEMPLATE_LANG || "en";
+
+  if (to.length === 0) {
+    return {
+      ok: false,
+      provider: "meta",
+      to: [],
+      message: text,
+      error: "WHATSAPP_TO is empty — set recipient numbers in .env.local",
+    };
+  }
 
   if (!token || !phoneNumberId) {
     return {
@@ -130,107 +182,4 @@ async function sendMeta(
     message: text,
     error: errors.length ? errors.join(" | ") : undefined,
   };
-}
-
-async function sendCallMeBot(
-  to: string[],
-  text: string,
-): Promise<WhatsAppSendResult> {
-  const apikey = process.env.WHATSAPP_CALLMEBOT_APIKEY;
-  if (!apikey) {
-    return {
-      ok: false,
-      provider: "callmebot",
-      to,
-      message: text,
-      error: "Missing WHATSAPP_CALLMEBOT_APIKEY",
-    };
-  }
-
-  const errors: string[] = [];
-  for (const phone of to) {
-    const url =
-      `https://api.callmebot.com/whatsapp.php` +
-      `?phone=${encodeURIComponent(phone)}` +
-      `&text=${encodeURIComponent(text)}` +
-      `&apikey=${encodeURIComponent(apikey)}`;
-    const res = await fetch(url);
-    const body = await res.text();
-    if (!res.ok || /error|invalid/i.test(body)) {
-      errors.push(`${phone}: ${body.slice(0, 200)}`);
-    }
-  }
-
-  return {
-    ok: errors.length === 0,
-    provider: "callmebot",
-    to,
-    message: text,
-    error: errors.length ? errors.join(" | ") : undefined,
-  };
-}
-
-async function sendPersonal(
-  to: string[],
-  text: string,
-): Promise<WhatsAppSendResult> {
-  const { sendPersonalWhatsApp } = await import("./whatsapp-personal");
-  const errors: string[] = [];
-  for (const phone of to) {
-    const result = await sendPersonalWhatsApp(phone, text);
-    if (!result.ok) errors.push(`${phone}: ${result.error || "send failed"}`);
-  }
-  return {
-    ok: errors.length === 0,
-    provider: "personal",
-    to,
-    message: text,
-    error: errors.length ? errors.join(" | ") : undefined,
-  };
-}
-
-export function whatsappConfigured(): boolean {
-  const to = recipients();
-  if (to.length === 0) return false;
-  const provider = (process.env.WHATSAPP_PROVIDER || "personal").toLowerCase();
-  if (provider === "callmebot")
-    return Boolean(process.env.WHATSAPP_CALLMEBOT_APIKEY);
-  if (provider === "dry-run") return true;
-  if (provider === "personal" || provider === "web") return true;
-  return Boolean(
-    process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID,
-  );
-}
-
-export async function sendWhatsAppAlert(
-  alert: WhatsAppAlert,
-): Promise<WhatsAppSendResult> {
-  const to = recipients();
-  const text = buildAlertText(alert);
-  const provider = (process.env.WHATSAPP_PROVIDER || "personal").toLowerCase();
-
-  if (to.length === 0) {
-    return {
-      ok: false,
-      provider: "dry-run",
-      to: [],
-      message: text,
-      error: "WHATSAPP_TO is empty — set recipient numbers in .env.local",
-    };
-  }
-
-  if (provider === "dry-run") {
-    console.log("[whatsapp:dry-run]", { to, text });
-    return { ok: true, provider: "dry-run", to, message: text };
-  }
-
-  if (provider === "callmebot") {
-    return sendCallMeBot(to, text);
-  }
-
-  if (provider === "personal" || provider === "web") {
-    return sendPersonal(to, text);
-  }
-
-  return sendMeta(to, alert, text);
 }
