@@ -364,15 +364,6 @@ export default function TrackingDashboard() {
               Updated {updatedLabel}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void refresh()}
-              className="min-h-10 rounded-xl bg-[var(--gg-green)] px-3.5 py-2 text-sm font-medium text-white transition active:scale-[0.98]"
-            >
-              Refresh
-            </button>
-          </div>
         </div>
       </header>
 
