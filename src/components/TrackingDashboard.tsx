@@ -10,7 +10,7 @@ import { statusBadge } from "@/lib/status-label";
 const TruckMap = dynamic(() => import("@/components/TruckMap"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-full items-center justify-center bg-[#e8efe8] text-sm text-[#3d4a3d]">
+    <div className="flex h-full items-center justify-center bg-[#e4ebe4] text-sm text-[var(--gg-muted)]">
       Loading map…
     </div>
   ),
@@ -43,13 +43,63 @@ type ApiResponse = {
   }>;
 };
 
-const STATUS_STYLE: Record<string, string> = {
-  LOADING: "bg-[#f3e0d2] text-[#8a3b12]",
-  LOADED: "bg-[#d9efe3] text-[#145c38]",
-  AT_FACTORY: "bg-[#ede9fe] text-[#5b21b6]",
-  EMPTY: "bg-[#d9e4f5] text-[#1d4f91]",
-  OFFLINE: "bg-[#eceff3] text-[#4b5563]",
+const STATUS_META: Record<
+  string,
+  { label: string; chip: string; bar: string }
+> = {
+  PARK: {
+    label: "Park",
+    chip: "bg-[#fef3c7] text-[#92400e]",
+    bar: "bg-[#a16207]",
+  },
+  LOADING: {
+    label: "Loading",
+    chip: "bg-[#f6e8df] text-[#8a3b12]",
+    bar: "bg-[#c45c26]",
+  },
+  LOADED: {
+    label: "Loaded",
+    chip: "bg-[#dff3e8] text-[#145c38]",
+    bar: "bg-[#1f7a4d]",
+  },
+  AT_FACTORY: {
+    label: "Factory",
+    chip: "bg-[#d8f3f0] text-[#0f766e]",
+    bar: "bg-[#0f766e]",
+  },
+  EMPTY: {
+    label: "Empty",
+    chip: "bg-[#e4eef8] text-[#1d4f91]",
+    bar: "bg-[#1d4f91]",
+  },
+  OFFLINE: {
+    label: "Offline",
+    chip: "bg-[#eef0f2] text-[#4b5563]",
+    bar: "bg-[#6b7280]",
+  },
 };
+
+type MobileTab = "map" | "list";
+
+function secondaryLine(t: TruckSnapshot): string | null {
+  if (t.status === "PARK" && (t.parkingPoint || t.lastPark)) {
+    return `At ${t.parkingPoint || t.lastPark}${t.distanceM != null ? ` · ${t.distanceM} m` : ""}`;
+  }
+  if (t.status === "LOADING" && t.loadingPoint) {
+    return `${t.loadingPoint}${t.distanceM != null ? ` · ${t.distanceM} m` : ""}`;
+  }
+  if (t.status === "LOADED" && t.lastLoadedFrom) {
+    return `Filled at ${t.lastLoadedFrom}`;
+  }
+  if (t.status === "AT_FACTORY" && t.factoryPoint) {
+    return `At ${t.factoryPoint}`;
+  }
+  if (t.status === "EMPTY" && t.lastFactory) {
+    return `Left ${t.lastFactory}`;
+  }
+  if (!t.online) return "GPS offline";
+  return null;
+}
 
 export default function TrackingDashboard() {
   const [data, setData] = useState<ApiResponse | null>(null);
@@ -62,6 +112,8 @@ export default function TrackingDashboard() {
   );
   const [waBusy, setWaBusy] = useState(false);
   const [waMsg, setWaMsg] = useState<string | null>(null);
+  const [mobileTab, setMobileTab] = useState<MobileTab>("map");
+  const [focusToken, setFocusToken] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -88,10 +140,15 @@ export default function TrackingDashboard() {
       const res = await fetch("/api/whatsapp", { method: "POST" });
       const json = (await res.json()) as {
         configured: boolean;
-        result: { ok: boolean; provider: string; error?: string; message: string };
+        result: {
+          ok: boolean;
+          provider: string;
+          error?: string;
+          message: string;
+        };
       };
       if (json.result.ok) {
-        setWaMsg(`Test sent via ${json.result.provider}`);
+        setWaMsg(`WhatsApp test sent`);
       } else {
         setWaMsg(json.result.error || "WhatsApp send failed");
       }
@@ -99,6 +156,7 @@ export default function TrackingDashboard() {
       setWaMsg(err instanceof Error ? err.message : "WhatsApp test failed");
     } finally {
       setWaBusy(false);
+      window.setTimeout(() => setWaMsg(null), 4000);
     }
   }, []);
 
@@ -113,7 +171,8 @@ export default function TrackingDashboard() {
     const q = query.trim().toLowerCase();
     return trucks.filter((t) => {
       if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
-      if (productFilter !== "ALL" && t.productLine !== productFilter) return false;
+      if (productFilter !== "ALL" && t.productLine !== productFilter)
+        return false;
       if (!q) return true;
       return (
         t.plate.toLowerCase().includes(q) ||
@@ -127,6 +186,7 @@ export default function TrackingDashboard() {
   const counts = useMemo(() => {
     if (data?.statusCounts) {
       return {
+        PARK: data.statusCounts.PARK ?? 0,
         LOADING: data.statusCounts.LOADING ?? 0,
         LOADED: data.statusCounts.LOADED ?? 0,
         AT_FACTORY: data.statusCounts.AT_FACTORY ?? 0,
@@ -135,6 +195,7 @@ export default function TrackingDashboard() {
       };
     }
     const c: Record<string, number> = {
+      PARK: 0,
       LOADING: 0,
       LOADED: 0,
       AT_FACTORY: 0,
@@ -147,221 +208,322 @@ export default function TrackingDashboard() {
     }
     return c;
   }, [trucks, data?.statusCounts]);
-  const countTotal = useMemo(
-    () =>
-      data?.statusCountTotal ??
-      counts.LOADING +
-        counts.LOADED +
-        counts.AT_FACTORY +
-        counts.EMPTY +
-        counts.OFFLINE,
-    [counts, data?.statusCountTotal],
+
+  const selected = useMemo(
+    () => filtered.find((t) => t.imei === selectedImei) ?? null,
+    [filtered, selectedImei],
+  );
+
+  const selectTruck = (imei: string) => {
+    setSelectedImei(imei);
+    setFocusToken((n) => n + 1);
+    setMobileTab("map");
+  };
+
+  const updatedLabel = data?.fetchedAt
+    ? new Date(data.fetchedAt).toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : loading
+      ? "…"
+      : "—";
+
+  const filters = (
+    <div className="space-y-3 border-b border-[var(--gg-line)] p-3">
+      <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+        {(
+          [
+            ["PARK", counts.PARK],
+            ["LOADING", counts.LOADING],
+            ["LOADED", counts.LOADED],
+            ["AT_FACTORY", counts.AT_FACTORY],
+            ["EMPTY", counts.EMPTY],
+            ["OFFLINE", counts.OFFLINE],
+          ] as const
+        ).map(([key, value]) => {
+          const meta = STATUS_META[key];
+          const on = statusFilter === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setStatusFilter((s) => (s === key ? "ALL" : key))}
+              className={`min-h-[3.25rem] rounded-xl px-1 py-2 text-center transition ${meta.chip} ${
+                on ? "ring-2 ring-[var(--gg-forest)] ring-offset-1" : "opacity-90"
+              }`}
+            >
+              <div className="text-base font-semibold tabular-nums leading-none">
+                {value}
+              </div>
+              <div className="mt-1 text-[10px] font-medium leading-tight">
+                {meta.label}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex gap-1.5 rounded-xl bg-[#eef3ee] p-1">
+        {(
+          [
+            ["ALL", "All"],
+            ["LPG", "LPG"],
+            ["PROPANE", "Propane"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setProductFilter(key)}
+            className={`min-h-9 flex-1 rounded-lg text-xs font-medium transition ${
+              productFilter === key
+                ? "bg-[var(--gg-forest)] text-white shadow-sm"
+                : "text-[var(--gg-muted)]"
+            }`}
+          >
+            {label}
+            {key !== "ALL" ? (
+              <span className="ml-1 opacity-70">
+                {key === "LPG"
+                  ? data?.productCounts?.LPG ?? 0
+                  : data?.productCounts?.PROPANE ?? 0}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+
+      <label className="relative block">
+        <span className="sr-only">Search trucks</span>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search plate or IMEI"
+          enterKeyHint="search"
+          autoCapitalize="characters"
+          className="w-full rounded-xl border border-[var(--gg-line)] bg-[var(--gg-bg)] py-3 pl-3 pr-10 text-base outline-none transition placeholder:text-[#8a988c] focus:border-[var(--gg-green)] sm:py-2.5 sm:text-sm"
+        />
+        {query ? (
+          <button
+            type="button"
+            onClick={() => setQuery("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs text-[var(--gg-muted)]"
+          >
+            Clear
+          </button>
+        ) : null}
+      </label>
+    </div>
+  );
+
+  const truckList = (
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      {loading && trucks.length === 0 ? (
+        <p className="p-5 text-sm text-[var(--gg-muted)]">Fetching fleet…</p>
+      ) : filtered.length === 0 ? (
+        <p className="p-5 text-sm text-[var(--gg-muted)]">No trucks match.</p>
+      ) : (
+        <ul>
+          {filtered.map((t) => {
+            const meta = STATUS_META[t.status] || STATUS_META.EMPTY;
+            const detail = secondaryLine(t);
+            const active = selectedImei === t.imei;
+            return (
+              <li key={t.imei}>
+                <button
+                  type="button"
+                  onClick={() => selectTruck(t.imei)}
+                  className={`flex w-full gap-3 border-b border-[var(--gg-line)] px-3 py-3.5 text-left transition hover:bg-[#f6faf6] active:bg-[#eaf3ea] ${
+                    active ? "bg-[#eaf3ea]" : "bg-white"
+                  }`}
+                >
+                  <span
+                    className={`mt-1 h-10 w-1 shrink-0 rounded-full ${meta.bar}`}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="truncate font-semibold tracking-wide">
+                        {t.plate}
+                      </span>
+                      <span
+                        className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium ${meta.chip}`}
+                      >
+                        {statusBadge(t.status)}
+                      </span>
+                    </span>
+                    <span className="mt-1 block text-xs text-[var(--gg-muted)]">
+                      {t.productLine} · {t.speed} km/h
+                    </span>
+                    {detail ? (
+                      <span className="mt-0.5 block truncate text-xs text-[var(--gg-ink)]/70">
+                        {detail}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 
   return (
-    <div className="flex h-dvh flex-col bg-[#f4f7f4] text-[#1a241a]">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#d5e0d5] bg-[#0f2a1f] px-4 py-3 text-white">
-        <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-[#9fc3b1]">
-            Green Gas
-          </p>
-          <h1 className="font-serif text-2xl tracking-tight">Fleet Tracker</h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-sm text-[#d7e8de]">
-          <span>
-            {trucks.length} trucks
-            {countTotal !== trucks.length ? ` (status sum ${countTotal})` : ""}
-          </span>
-          <span>
-            LPG {data?.productCounts?.LPG ?? 0} · Propane{" "}
-            {data?.productCounts?.PROPANE ?? 0}
-          </span>
-          <span>
-            {data?.fetchedAt
-              ? `Updated ${new Date(data.fetchedAt).toLocaleTimeString()}`
-              : loading
-                ? "Loading…"
-                : "—"}
-          </span>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            className="rounded bg-[#1f7a4d] px-3 py-1.5 text-white hover:bg-[#196640]"
-          >
-            Refresh
-          </button>
-          <button
-            type="button"
-            disabled={waBusy}
-            onClick={() => void sendTestWhatsApp()}
-            className="rounded bg-[#128c7e] px-3 py-1.5 text-white hover:bg-[#0e7368] disabled:opacity-60"
-          >
-            {waBusy ? "Sending…" : "Test WhatsApp"}
-          </button>
+    <div className="flex h-dvh flex-col bg-[var(--gg-bg)] text-[var(--gg-ink)]">
+      <header className="safe-pad-x safe-pad-top border-b border-white/10 bg-[var(--gg-forest)] pb-3 text-white">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="font-serif text-xl tracking-tight sm:text-2xl">
+                Green Gas
+              </h1>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[#b7d4c4]">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#6ee7a8] opacity-60" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#6ee7a8]" />
+                </span>
+                Live
+              </span>
+            </div>
+            <p className="mt-1 truncate text-xs text-[#c5ddd0]">
+              {trucks.length} trucks
+              <span className="mx-1.5 text-white/30">·</span>
+              Updated {updatedLabel}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              className="min-h-10 rounded-xl bg-[var(--gg-green)] px-3.5 py-2 text-sm font-medium text-white transition active:scale-[0.98]"
+            >
+              Refresh
+            </button>
+            <button
+              type="button"
+              disabled={waBusy}
+              onClick={() => void sendTestWhatsApp()}
+              title="Test WhatsApp"
+              className="hidden min-h-10 rounded-xl bg-white/10 px-3 py-2 text-sm text-[#d7e8de] transition hover:bg-white/15 disabled:opacity-50 lg:inline-flex"
+            >
+              {waBusy ? "…" : "WA"}
+            </button>
+          </div>
         </div>
       </header>
 
-      {waMsg && (
-        <div className="border-b border-[#b7e0d8] bg-[#e8f7f4] px-4 py-2 text-sm text-[#0f5c52]">
-          WhatsApp: {waMsg}
+      {waMsg ? (
+        <div className="safe-pad-x border-b border-[#b7e0d8] bg-[#e8f7f4] py-2 text-sm text-[#0f5c52]">
+          {waMsg}
         </div>
-      )}
-
-      <div className="border-b border-[#d5e0d5] bg-white px-4 py-2 text-xs text-[#3d4a3d]">
-        WhatsApp (Meta):{" "}
-        {data?.whatsappConfigured
-          ? "configured — alerts on LOADING / LOADED / factory"
-          : "not configured — set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TO"}
-        {data?.factoryCount === 0
-          ? " · add factory map pins to flip LOADED → EMPTY"
-          : ""}
-        {data?.alerts?.length
-          ? ` · last poll sent ${data.alerts.length} alert(s)`
-          : ""}
-      </div>
+      ) : null}
 
       {(data?.errors?.length || data?.error) && (
-        <div className="border-b border-[#f0c9a0] bg-[#fff4e8] px-4 py-2 text-sm text-[#7a3f10]">
-          <strong>ProTrack:</strong>{" "}
+        <div className="safe-pad-x border-b border-[#f0c9a0] bg-[#fff7ed] py-2.5 text-sm text-[#7a3f10]">
           {data.error || data.errors?.join(" · ")}
-          {(data.errors?.some((e) => e.includes("10007")) ||
-            data.error?.includes("10007")) && (
-            <span>
-              {" "}
-              — Ask your GPS vendor to enable <em>Open API</em> on accounts
-              GGLPG / GG11 (error 10007 = permission denied).
-            </span>
-          )}
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[380px_1fr]">
-        <aside className="flex min-h-0 flex-col border-r border-[#d5e0d5] bg-white">
-          <div className="space-y-3 border-b border-[#e6eee6] p-3">
-            <div className="grid grid-cols-5 gap-1.5 text-center text-[10px]">
-              {(
-                [
-                  ["LOADING", counts.LOADING],
-                  ["LOADED", counts.LOADED],
-                  ["AT_FACTORY", counts.AT_FACTORY],
-                  ["EMPTY", counts.EMPTY],
-                  ["OFFLINE", counts.OFFLINE],
-                ] as const
-              ).map(([key, value]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() =>
-                    setStatusFilter((s) => (s === key ? "ALL" : key))
-                  }
-                  className={`rounded-md px-0.5 py-2 ${STATUS_STYLE[key]} ${
-                    statusFilter === key ? "ring-2 ring-[#0f2a1f]/40" : ""
-                  }`}
-                >
-                  <div className="text-sm font-semibold">{value}</div>
-                  <div className="leading-tight">
-                    {key === "AT_FACTORY" ? "FACTORY" : key}
-                  </div>
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-2 text-xs">
-              {(
-                [
-                  ["ALL", "All"],
-                  ["LPG", `LPG (${data?.productCounts?.LPG ?? 0})`],
-                  ["PROPANE", `Propane (${data?.productCounts?.PROPANE ?? 0})`],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setProductFilter(key)}
-                  className={`rounded-md px-2 py-1 ${
-                    productFilter === key
-                      ? "bg-[#0f2a1f] text-white"
-                      : "bg-[#eef3ee] text-[#3d4a3d]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search plate / IMEI"
-              className="w-full rounded-md border border-[#cfdccf] bg-[#f8fbf8] px-3 py-2 text-sm outline-none focus:border-[#1f7a4d]"
+      <div className="relative flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[360px_1fr]">
+        <aside
+          className={`min-h-0 flex-col border-r border-[var(--gg-line)] bg-[var(--gg-surface)] ${
+            mobileTab === "list" ? "relative z-20 flex flex-1" : "hidden"
+          } lg:relative lg:z-auto lg:flex lg:flex-none`}
+        >
+          {filters}
+          {truckList}
+        </aside>
+
+        <section
+          className={
+            mobileTab === "map"
+              ? "relative min-h-0 flex-1"
+              : "pointer-events-none absolute inset-0 z-0 opacity-0 lg:pointer-events-auto lg:relative lg:z-auto lg:min-h-0 lg:flex-1 lg:opacity-100"
+          }
+        >
+          <div className="absolute inset-0">
+            <TruckMap
+              trucks={filtered}
+              loadingPoints={data?.loadingPoints ?? []}
+              factoryPoints={data?.factoryPoints ?? []}
+              radiusM={data?.radiusM ?? 500}
+              selectedImei={selectedImei}
+              focusToken={focusToken}
             />
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {loading && trucks.length === 0 ? (
-              <p className="p-4 text-sm text-[#5b6b5b]">Fetching fleet…</p>
-            ) : filtered.length === 0 ? (
-              <p className="p-4 text-sm text-[#5b6b5b]">No trucks match.</p>
-            ) : (
-              <ul>
-                {filtered.map((t) => (
-                  <li key={t.imei}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedImei(t.imei)}
-                      className={`flex w-full flex-col gap-1 border-b border-[#eef3ee] px-3 py-3 text-left hover:bg-[#f3f8f3] ${
-                        selectedImei === t.imei ? "bg-[#eaf3ea]" : ""
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold tracking-wide">
-                          {t.plate}
-                        </span>
-                        <span
-                          className={`rounded px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLE[t.status] || STATUS_STYLE.EMPTY}`}
-                        >
-                          {statusBadge(t.status)}
-                        </span>
+          {/* Selected truck card */}
+          {selected ? (
+            <div className="absolute inset-x-3 bottom-3 z-[500] sm:inset-x-auto sm:bottom-4 sm:left-3 sm:w-[320px]">
+              <div className="rounded-2xl bg-white/95 p-3 shadow-lg ring-1 ring-black/5 backdrop-blur">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-base font-semibold tracking-wide">
+                      {selected.plate}
+                    </div>
+                    <div className="mt-0.5 text-xs text-[var(--gg-muted)]">
+                      {selected.productLine} · {selected.speed} km/h ·{" "}
+                      {statusBadge(selected.status)}
+                    </div>
+                    {secondaryLine(selected) ? (
+                      <div className="mt-1 truncate text-xs text-[var(--gg-ink)]/75">
+                        {secondaryLine(selected)}
                       </div>
-                      <div className="text-xs text-[#5b6b5b]">
-                        {t.productLine} · {t.speed} km/h
-                        {t.online ? "" : " · GPS offline"}
-                      </div>
-                      {t.status === "LOADED" && t.lastLoadedFrom ? (
-                        <div className="text-xs text-[#145c38]">
-                          Filled at {t.lastLoadedFrom} → factory
-                        </div>
-                      ) : null}
-                      {t.status === "AT_FACTORY" && t.factoryPoint ? (
-                        <div className="text-xs text-[#5b21b6]">
-                          At {t.factoryPoint}
-                        </div>
-                      ) : null}
-                      {t.status === "EMPTY" && t.lastFactory ? (
-                        <div className="text-xs text-[#1d4f91]">
-                          Emptied at {t.lastFactory}
-                        </div>
-                      ) : null}
-                      {t.loadingPoint && t.status === "LOADING" ? (
-                        <div className="text-xs text-[#8a3b12]">
-                          {t.loadingPoint} · {t.distanceM} m
-                        </div>
-                      ) : null}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </aside>
-
-        <section className="relative min-h-[50vh] lg:min-h-0">
-          <TruckMap
-            trucks={filtered}
-            loadingPoints={data?.loadingPoints ?? []}
-            factoryPoints={data?.factoryPoints ?? []}
-            radiusM={data?.radiusM ?? 500}
-            selectedImei={selectedImei}
-          />
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedImei(null)}
+                    className="rounded-lg px-2 py-1 text-xs text-[var(--gg-muted)] hover:bg-[#eef3ee]"
+                  >
+                    Close
+                  </button>
+                </div>
+                {selected.lat != null && selected.lng != null ? (
+                  <a
+                    className="mt-3 flex min-h-10 items-center justify-center rounded-xl bg-[var(--gg-green)] text-sm font-medium text-white"
+                    href={`https://maps.google.com/?q=${selected.lat},${selected.lng}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open in Google Maps
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </section>
+
+        <nav className="safe-pad-x safe-pad-bottom grid grid-cols-2 gap-1 border-t border-[var(--gg-line)] bg-white px-2 pt-1.5 lg:hidden">
+          {(
+            [
+              ["map", "Map", "Live GPS"],
+              ["list", "Fleet", `${filtered.length} trucks`],
+            ] as const
+          ).map(([key, label, hint]) => {
+            const on = mobileTab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setMobileTab(key)}
+                className={`min-h-12 rounded-xl text-sm font-medium transition ${
+                  on
+                    ? "bg-[#e8f3ec] text-[var(--gg-forest)]"
+                    : "text-[var(--gg-muted)]"
+                }`}
+              >
+                <span className="block">{label}</span>
+                <span className="block text-[10px] font-normal opacity-70">
+                  {hint}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
       </div>
     </div>
   );

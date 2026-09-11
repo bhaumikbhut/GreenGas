@@ -3,6 +3,8 @@ import type { AutoStatus } from "./geofence";
 /** One human label per truck — status already implies cargo. */
 export function statusLabel(status: AutoStatus | string): string {
   switch (status) {
+    case "PARK":
+      return "PARK";
     case "LOADING":
       return "LOADING";
     case "LOADED":
@@ -21,5 +23,6 @@ export function statusLabel(status: AutoStatus | string): string {
 /** Short badge text (no cargo duplicate). */
 export function statusBadge(status: AutoStatus | string): string {
   if (status === "AT_FACTORY") return "FACTORY";
+  if (status === "PARK") return "PARK";
   return String(status);
 }

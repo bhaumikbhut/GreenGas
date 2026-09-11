@@ -1,74 +1,183 @@
+export type PortSiteKind = "loading" | "parking";
+
 export type LoadingPoint = {
   id: string;
   name: string;
   port: string;
   lat: number;
   lng: number;
+  /** Geofence radius in meters (from field ops / Neel). */
+  radiusM: number;
+  kind: PortSiteKind;
 };
 
-/** Loading terminals from Jalpesh map pins (500m geofence default). */
+/**
+ * Port loading + parking pins from Neel Gadhiya (Sep 2026).
+ * Each site has its own radius — do not use a global 500 m default.
+ */
 export const LOADING_POINTS: LoadingPoint[] = [
+  // —— Mundra Adani ——
   {
-    id: "pipavav-1",
-    name: "Pipavav Port",
+    id: "mundra-mokha-parking",
+    name: "Mundra Adani Mokha Parking",
+    port: "MUNDRA",
+    lat: 22.924155,
+    lng: 69.792248,
+    radiusM: 500,
+    kind: "parking",
+  },
+  {
+    id: "mundra-ct4-parking",
+    name: "Mundra Adani CT 4 Parking",
+    port: "MUNDRA",
+    lat: 22.753098,
+    lng: 69.680227,
+    radiusM: 200,
+    kind: "parking",
+  },
+  {
+    id: "mundra-loading",
+    name: "Mundra Adani Loading Point",
+    port: "MUNDRA",
+    lat: 22.736042,
+    lng: 69.707443,
+    radiusM: 75,
+    kind: "loading",
+  },
+  // —— Kandla IOCL ——
+  {
+    id: "kandla-iocl-loading",
+    name: "Kandla IOCL Loading Point",
+    port: "KANDLA",
+    lat: 23.034444,
+    lng: 70.193498,
+    radiusM: 140,
+    kind: "loading",
+  },
+  {
+    id: "kandla-iocl-gate1",
+    name: "Kandla IOCL Parking Gate 1",
+    port: "KANDLA",
+    lat: 23.036486,
+    lng: 70.193519,
+    radiusM: 100,
+    kind: "parking",
+  },
+  {
+    id: "kandla-iocl-gate2",
+    name: "Kandla IOCL Parking Gate 2",
+    port: "KANDLA",
+    lat: 23.03602,
+    lng: 70.195551,
+    radiusM: 100,
+    kind: "parking",
+  },
+  // —— Aegis Pipavav ——
+  {
+    id: "pipavav-aegis-load1",
+    name: "Aegis Pipavav Loading Point 1",
     port: "PIPAVAV",
-    lat: 20.936492,
-    lng: 71.496157,
+    lat: 20.93516,
+    lng: 71.496846,
+    radiusM: 25,
+    kind: "loading",
   },
   {
-    id: "pipavav-2",
-    name: "Pipavav / Rajula",
+    id: "pipavav-aegis-load2",
+    name: "Aegis Pipavav Loading Point 2",
     port: "PIPAVAV",
-    lat: 20.985285,
-    lng: 71.511515,
+    lat: 20.935888,
+    lng: 71.498414,
+    radiusM: 28,
+    kind: "loading",
   },
   {
-    id: "porbandar-1",
-    name: "Porbandar",
-    port: "PORBANDER",
-    lat: 21.652871,
-    lng: 69.569653,
+    id: "pipavav-aegis-parking",
+    name: "Aegis Pipavav Parking",
+    port: "PIPAVAV",
+    lat: 20.936296,
+    lng: 71.496275,
+    radiusM: 30,
+    kind: "parking",
   },
   {
-    id: "kandla-1",
-    name: "Kandla area A",
+    id: "pipavav-shreji-parking",
+    name: "Shreji Parking Aegis Pipavav",
+    port: "PIPAVAV",
+    lat: 20.985982,
+    lng: 71.51144,
+    radiusM: 150,
+    kind: "parking",
+  },
+  // —— Aegis Kandla ——
+  {
+    id: "kandla-aegis-parking",
+    name: "Aegis Kandla Parking",
     port: "KANDLA",
-    lat: 22.343957,
-    lng: 69.76512,
+    lat: 23.026978,
+    lng: 70.196829,
+    radiusM: 150,
+    kind: "parking",
   },
   {
-    id: "kandla-2",
-    name: "Kandla area B",
+    id: "kandla-aegis-load1",
+    name: "Aegis Kandla Loading Point 1",
     port: "KANDLA",
-    lat: 22.355751,
-    lng: 69.77233,
+    lat: 23.028229,
+    lng: 70.20123,
+    radiusM: 35,
+    kind: "loading",
   },
   {
-    id: "kandla-3",
-    name: "Kandla area C",
+    id: "kandla-aegis-load2",
+    name: "Aegis Kandla Loading Point 2",
     port: "KANDLA",
-    lat: 22.354288,
-    lng: 69.773495,
+    lat: 23.028769,
+    lng: 70.199516,
+    radiusM: 25,
+    kind: "loading",
   },
+  // —— Dahej GTPCL ——
   {
-    id: "kandla-4",
-    name: "Kandla area D",
-    port: "KANDLA",
-    lat: 22.345424,
-    lng: 69.870554,
-  },
-  {
-    id: "dahej-1",
-    name: "Dahej A",
+    id: "dahej-gtpcl-parking",
+    name: "Dahej GTPCL Parking",
     port: "DAHEJ",
-    lat: 21.690044,
-    lng: 72.5399,
+    lat: 21.690055,
+    lng: 72.539483,
+    radiusM: 80,
+    kind: "parking",
   },
   {
-    id: "dahej-2",
-    name: "Dahej B",
+    id: "dahej-gtpcl-load1",
+    name: "Dahej GTPCL Loading Point 1",
     port: "DAHEJ",
-    lat: 21.69249,
-    lng: 72.539973,
+    lat: 21.692484,
+    lng: 72.53928,
+    radiusM: 25,
+    kind: "loading",
+  },
+  {
+    id: "dahej-gtpcl-load2",
+    name: "Dahej GTPCL Loading Point 2",
+    port: "DAHEJ",
+    lat: 21.692309,
+    lng: 72.540375,
+    radiusM: 25,
+    kind: "loading",
+  },
+  // —— Porbandar Confidence ——
+  {
+    id: "porbandar-confidence",
+    name: "Porbandar Confidence Loading & Parking",
+    port: "PORBANDAR",
+    lat: 21.652721,
+    lng: 69.569991,
+    radiusM: 115,
+    kind: "loading",
   },
 ];
+
+export const PARKING_POINTS = LOADING_POINTS.filter((p) => p.kind === "parking");
+export const PORT_LOADING_POINTS = LOADING_POINTS.filter(
+  (p) => p.kind === "loading",
+);

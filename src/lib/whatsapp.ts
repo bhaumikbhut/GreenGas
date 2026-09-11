@@ -4,7 +4,7 @@ export type WhatsAppAlert = {
   plate: string;
   imei: string;
   productLine: string;
-  status: "LOADING" | "LOADED" | "AT_FACTORY" | "EMPTY" | "ARRIVED";
+  status: "PARK" | "LOADING" | "LOADED" | "AT_FACTORY" | "EMPTY" | "ARRIVED";
   locationName: string;
   port?: string | null;
   when: Date;
@@ -44,15 +44,17 @@ export function buildAlertText(alert: WhatsAppAlert): string {
     : alert.locationName;
 
   const verb =
-    alert.status === "LOADING"
-      ? "reached port loading point"
-      : alert.status === "LOADED"
-        ? "left port — LOADED (filled), heading to factory"
-        : alert.status === "AT_FACTORY" || alert.status === "ARRIVED"
-          ? "reached factory"
-          : alert.status === "EMPTY"
-            ? "left factory — EMPTY"
-            : "status update";
+    alert.status === "PARK"
+      ? "reached parking"
+      : alert.status === "LOADING"
+        ? "reached port loading point"
+        : alert.status === "LOADED"
+          ? "left port — LOADED (filled), heading to factory"
+          : alert.status === "AT_FACTORY" || alert.status === "ARRIVED"
+            ? "reached factory"
+            : alert.status === "EMPTY"
+              ? "left site — EMPTY"
+              : "status update";
 
   const cargoLabel =
     alert.status === "LOADED" || alert.status === "AT_FACTORY"
@@ -60,8 +62,10 @@ export function buildAlertText(alert: WhatsAppAlert): string {
       : alert.status === "EMPTY"
         ? "EMPTY"
         : alert.status === "LOADING"
-          ? "at port"
-          : "—";
+          ? "at loading"
+          : alert.status === "PARK"
+            ? "at parking"
+            : "—";
 
   const lines = [
     `Green Gas alert`,

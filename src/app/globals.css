@@ -2,14 +2,35 @@
 @import "leaflet/dist/leaflet.css";
 
 :root {
-  --background: #f4f7f4;
-  --foreground: #1a241a;
+  --gg-bg: #f3f6f3;
+  --gg-ink: #142018;
+  --gg-muted: #5c6b5f;
+  --gg-line: #dce6dd;
+  --gg-surface: #ffffff;
+  --gg-forest: #0f2a1f;
+  --gg-green: #1f7a4d;
+  --gg-loading: #c45c26;
+  --gg-loaded: #1f7a4d;
+  --gg-factory: #0f766e;
+  --gg-empty: #1d4f91;
+  --gg-offline: #6b7280;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--gg-bg);
+  color: var(--gg-ink);
   font-family: var(--font-body), "Source Sans 3", system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .font-serif {
@@ -20,5 +41,48 @@ body {
   width: 100%;
   height: 100%;
   z-index: 0;
-  background: #e8efe8;
+  background: #e4ebe4;
+  touch-action: pan-x pan-y;
+  font: inherit;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(15, 42, 31, 0.14);
+  border: 1px solid var(--gg-line);
+}
+
+.leaflet-popup-content {
+  margin: 10px 12px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--gg-ink);
+}
+
+.gg-truck-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.gg-truck-pin {
+  will-change: transform;
+}
+
+.leaflet-control-attribution {
+  font-size: 9px !important;
+  max-width: 48vw;
+  background: rgba(255, 255, 255, 0.75) !important;
+}
+
+@supports (padding: max(0px)) {
+  .safe-pad-x {
+    padding-left: max(1rem, var(--safe-left));
+    padding-right: max(1rem, var(--safe-right));
+  }
+  .safe-pad-top {
+    padding-top: max(0.65rem, var(--safe-top));
+  }
+  .safe-pad-bottom {
+    padding-bottom: max(0.45rem, var(--safe-bottom));
+  }
 }

@@ -3,6 +3,7 @@ import { FACTORY_POINTS } from "@/lib/factory-points";
 import {
   findNearestFactoryPoint,
   findNearestLoadingPoint,
+  findNearestParkingPoint,
   nextStatus,
   type AutoStatus,
   type TruckMemory,
@@ -41,12 +42,14 @@ export type TruckSnapshot = {
   online: boolean;
   status: AutoStatus;
   loadingPoint: string | null;
+  parkingPoint: string | null;
   factoryPoint: string | null;
   port: string | null;
   distanceM: number | null;
   cargo: "LOADED" | "EMPTY";
   lastLoadedFrom: string | null;
   lastFactory: string | null;
+  lastPark: string | null;
 };
 
 function radiusM(): number {
@@ -54,8 +57,9 @@ function radiusM(): number {
   return Number.isFinite(n) && n > 0 ? n : 500;
 }
 
-/** Alert once per transition into these statuses. EMPTY = left factory. */
+/** Alert once per transition into these statuses. */
 const ALERT_STATUSES = new Set<AutoStatus>([
+  "PARK",
   "LOADING",
   "LOADED",
   "AT_FACTORY",
@@ -189,7 +193,11 @@ export async function GET(request: Request) {
 
     const insideLoading =
       track && online && hasFix
-        ? findNearestLoadingPoint(track.latitude, track.longitude, r)
+        ? findNearestLoadingPoint(track.latitude, track.longitude)
+        : null;
+    const insideParking =
+      track && online && hasFix
+        ? findNearestParkingPoint(track.latitude, track.longitude)
         : null;
     const insideFactory =
       track && online && hasFix
@@ -200,6 +208,7 @@ export async function GET(request: Request) {
     const memory = nextStatus({
       prev,
       insideLoading,
+      insideParking,
       insideFactory,
       online: Boolean(track) && online,
     });
@@ -220,24 +229,31 @@ export async function GET(request: Request) {
     if (shouldAlert) {
       const locationName =
         insideLoading?.point.name ||
+        insideParking?.point.name ||
         insideFactory?.point.name ||
         (memory.status === "LOADED"
           ? memory.lastLoadedFrom || "Port (departed)"
           : memory.status === "EMPTY"
-            ? memory.lastFactory || "Factory (departed)"
-            : "Unknown");
+            ? memory.lastFactory || memory.lastPark || "Departed"
+            : memory.status === "PARK"
+              ? memory.lastPark || "Parking"
+              : "Unknown");
 
       const result = await sendWhatsAppAlert({
         plate: device.plate,
         imei: device.imei,
         productLine: device.accountLabel,
         status: memory.status as
+          | "PARK"
           | "LOADING"
           | "LOADED"
           | "AT_FACTORY"
           | "EMPTY",
         locationName,
-        port: insideLoading?.point.port ?? null,
+        port:
+          insideLoading?.point.port ??
+          insideParking?.point.port ??
+          null,
         when: new Date(),
         lat: hasFix ? track!.latitude : null,
         lng: hasFix ? track!.longitude : null,
@@ -273,7 +289,9 @@ export async function GET(request: Request) {
     const near =
       memory.cargo === "LOADED"
         ? insideFactory
-        : insideLoading;
+        : memory.status === "PARK"
+          ? insideParking
+          : insideLoading;
 
     trucks.push({
       imei: device.imei,
@@ -289,12 +307,17 @@ export async function GET(request: Request) {
       online: Boolean(track) && online,
       status: memory.status,
       loadingPoint: insideLoading?.point.name ?? null,
+      parkingPoint: insideParking?.point.name ?? null,
       factoryPoint: insideFactory?.point.name ?? null,
-      port: insideLoading?.point.port ?? null,
+      port:
+        insideLoading?.point.port ??
+        insideParking?.point.port ??
+        null,
       distanceM: near ? Math.round(near.distanceM) : null,
       cargo: memory.cargo,
       lastLoadedFrom: memory.lastLoadedFrom ?? null,
       lastFactory: memory.lastFactory ?? null,
+      lastPark: memory.lastPark ?? null,
     });
   }
 
@@ -306,6 +329,7 @@ export async function GET(request: Request) {
     : trucks;
 
   const statusCounts = {
+    PARK: 0,
     LOADING: 0,
     LOADED: 0,
     AT_FACTORY: 0,
@@ -331,6 +355,7 @@ export async function GET(request: Request) {
     productCounts: { LPG: lpgCount, PROPANE: propaneCount },
     statusCounts,
     statusCountTotal:
+      statusCounts.PARK +
       statusCounts.LOADING +
       statusCounts.LOADED +
       statusCounts.AT_FACTORY +

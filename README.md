@@ -19,15 +19,18 @@ Live truck map + auto status from ProTrack (portal bridge) + WhatsApp alerts via
 ## Status rules (no driver input)
 
 ```text
-EMPTY  → enter port 500m     → LOADING
-LOADING → leave port         → LOADED   (filled, on road to factory)
-LOADED → enter factory       → AT_FACTORY
-AT_FACTORY → leave factory   → EMPTY    (empty, on road)
+EMPTY/PARK → enter parking (site radius)  → PARK
+PARK       → leave parking                → EMPTY
+EMPTY/PARK → enter loading (site radius)  → LOADING
+LOADING    → leave loading                → LOADED   (filled → factory)
+LOADED     → enter factory                → AT_FACTORY
+AT_FACTORY → leave factory                → EMPTY
 ```
 
-- **LOADING** only while at a port pin  
-- On road: **LOADED** (filled) or **EMPTY**  
-- WhatsApp on each transition + **live track link** (`/track/<imei>`) + map pin  
+- Each loading/parking pin has its **own radius** (Neel field pins, Sep 2026)  
+- Loading bay wins over parking if both apply  
+- On road: **LOADED** (filled) or **EMPTY** / **PARK** at yards  
+- WhatsApp on transitions + live track link (`/track/<imei>`)  
 - Factory unload hubs: `src/lib/factory-points.ts`  
 - Set `APP_PUBLIC_URL` for WhatsApp live-track links  
 - Production status memory: **Upstash Redis** (`KV_REST_API_URL` / `KV_REST_API_TOKEN`)
