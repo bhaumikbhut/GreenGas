@@ -34,6 +34,7 @@ AT_FACTORY → leave factory                → EMPTY
 - Factory unload hubs: `src/lib/factory-points.ts`  
 - Set `APP_PUBLIC_URL` for WhatsApp live-track links  
 - Production status memory: **Upstash Redis** (`KV_REST_API_URL` / `KV_REST_API_TOKEN`)
+- Fleet positions: cached in Redis. While the dashboard is open, stale snapshots trigger a **background ProTrack refresh** (no wait on the browser). On Hobby, Vercel Cron warms cache once daily; upgrade to Pro for every-minute cron. `/api/trucks` reads the cache (fast). First cold load may still wait on ProTrack (~20–25s).
 
 ## GPS source
 
@@ -60,3 +61,5 @@ Create an app in [Meta for Developers](https://developers.facebook.com/), add Wh
 - **Local:** `npm run build && npm run start` → http://localhost:3000  
 - **Production:** https://green-gas-sigma.vercel.app  
 - Health: `GET /api/health`  
+- Warm cache: `GET /api/cron/refresh-fleet` (set `CRON_SECRET`; Vercel Cron sends `Authorization: Bearer …`)  
+- Optional force live pull: `GET /api/trucks?live=1`  
