@@ -28,3 +28,4 @@ export function statusStoreMode(): "redis" | "file" | "ephemeral" {
 
 export const TRUCK_HASH_KEY = "green-gas:truck-state";
 export const NOTIF_LIST_KEY = "green-gas:notifications";
+export const PORTAL_SESSION_KEY_PREFIX = "green-gas:portal-session:";

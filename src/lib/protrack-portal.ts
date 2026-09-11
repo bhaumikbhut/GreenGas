@@ -7,6 +7,7 @@ import type {
   ProtrackTrackPoint,
 } from "./protrack";
 import { getConfiguredAccounts } from "./protrack";
+import { getRedis, PORTAL_SESSION_KEY_PREFIX } from "./kv";
 
 const PORTAL_ORIGIN =
   process.env.PROTRACK_PORTAL_URL?.replace(/\/$/, "") ||
@@ -14,6 +15,10 @@ const PORTAL_ORIGIN =
 const GPS_DATA_URL =
   process.env.PROTRACK_GPSDATA_URL?.replace(/\/$/, "") ||
   "https://real.gpscenter.xyz";
+
+/** Keep session this long; refresh a bit early so we never send an expired token. */
+const SESSION_TTL_MS = 55 * 60 * 1000;
+const SESSION_REUSE_SKEW_MS = 5 * 60 * 1000;
 
 type PortalSession = {
   token: string;
@@ -26,6 +31,65 @@ type PortalSession = {
 type FieldKeyMap = Record<string, number>;
 
 const sessionCache = new Map<string, PortalSession>();
+
+function sessionRedisKey(account: string): string {
+  return `${PORTAL_SESSION_KEY_PREFIX}${account}`;
+}
+
+function isReusable(session: PortalSession | null | undefined): session is PortalSession {
+  return Boolean(
+    session &&
+      session.token &&
+      session.customerId &&
+      session.expiresAt > Date.now() + SESSION_REUSE_SKEW_MS,
+  );
+}
+
+async function readSession(account: string): Promise<PortalSession | null> {
+  const mem = sessionCache.get(account);
+  if (isReusable(mem)) return mem;
+
+  const redis = getRedis();
+  if (!redis) return null;
+
+  try {
+    const raw = await redis.get<PortalSession | string>(sessionRedisKey(account));
+    if (!raw) return null;
+    const session =
+      typeof raw === "string" ? (JSON.parse(raw) as PortalSession) : raw;
+    if (!isReusable(session)) return null;
+    sessionCache.set(account, session);
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+async function writeSession(session: PortalSession): Promise<void> {
+  sessionCache.set(session.account, session);
+  const redis = getRedis();
+  if (!redis) return;
+  const ttlSec = Math.max(
+    60,
+    Math.floor((session.expiresAt - Date.now()) / 1000),
+  );
+  try {
+    await redis.set(sessionRedisKey(session.account), session, { ex: ttlSec });
+  } catch {
+    // Memory cache still helps within this instance
+  }
+}
+
+async function clearSession(account: string): Promise<void> {
+  sessionCache.delete(account);
+  const redis = getRedis();
+  if (!redis) return;
+  try {
+    await redis.del(sessionRedisKey(account));
+  } catch {
+    // ignore
+  }
+}
 
 function md5(value: string): string {
   return createHash("md5").update(value).digest("hex");
@@ -88,10 +152,8 @@ function extractToken(headers: Record<string, string | string[]>): string | null
 }
 
 async function portalLogin(acc: ProtrackAccount): Promise<PortalSession> {
-  const cached = sessionCache.get(acc.account);
-  if (cached && cached.expiresAt > Date.now() + 5 * 60 * 1000) {
-    return cached;
-  }
+  const cached = await readSession(acc.account);
+  if (cached) return cached;
 
   const passwd = md5(acc.password);
   const url =
@@ -141,9 +203,9 @@ async function portalLogin(acc: ProtrackAccount): Promise<PortalSession> {
     customerId: String(data.customerid),
     account: acc.account,
     label: acc.label,
-    expiresAt: Date.now() + 55 * 60 * 1000,
+    expiresAt: Date.now() + SESSION_TTL_MS,
   };
-  sessionCache.set(acc.account, session);
+  await writeSession(session);
   return session;
 }
 
@@ -221,6 +283,13 @@ function isOnlineFromPortal(
 export async function fetchPortalFleet(
   acc: ProtrackAccount,
 ): Promise<PortalFleetRow[]> {
+  return fetchPortalFleetOnce(acc, true);
+}
+
+async function fetchPortalFleetOnce(
+  acc: ProtrackAccount,
+  allowRetry: boolean,
+): Promise<PortalFleetRow[]> {
   const session = await portalLogin(acc);
   const payload = await postForm<PortalFleetResponse>(
     `${GPS_DATA_URL}/LocationService?method=customerDeviceAndGpsone`,
@@ -236,7 +305,10 @@ export async function fetchPortalFleet(
   );
 
   if (payload.errorcode !== 0 || !payload.key || !payload.records) {
-    sessionCache.delete(acc.account);
+    await clearSession(acc.account);
+    if (allowRetry) {
+      return fetchPortalFleetOnce(acc, false);
+    }
     throw new Error(
       `Portal fleet failed for ${acc.account}: code=${payload.errorcode} ${payload.errormsg || ""}`.trim(),
     );
