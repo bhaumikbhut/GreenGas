@@ -110,8 +110,6 @@ export default function TrackingDashboard() {
   const [productFilter, setProductFilter] = useState<"ALL" | "LPG" | "PROPANE">(
     "ALL",
   );
-  const [waBusy, setWaBusy] = useState(false);
-  const [waMsg, setWaMsg] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("map");
   const [focusToken, setFocusToken] = useState(0);
 
@@ -130,33 +128,6 @@ export default function TrackingDashboard() {
       });
     } finally {
       setLoading(false);
-    }
-  }, []);
-
-  const sendTestWhatsApp = useCallback(async () => {
-    setWaBusy(true);
-    setWaMsg(null);
-    try {
-      const res = await fetch("/api/whatsapp", { method: "POST" });
-      const json = (await res.json()) as {
-        configured: boolean;
-        result: {
-          ok: boolean;
-          provider: string;
-          error?: string;
-          message: string;
-        };
-      };
-      if (json.result.ok) {
-        setWaMsg(`WhatsApp test sent`);
-      } else {
-        setWaMsg(json.result.error || "WhatsApp send failed");
-      }
-    } catch (err) {
-      setWaMsg(err instanceof Error ? err.message : "WhatsApp test failed");
-    } finally {
-      setWaBusy(false);
-      window.setTimeout(() => setWaMsg(null), 4000);
     }
   }, []);
 
@@ -402,24 +373,9 @@ export default function TrackingDashboard() {
             >
               Refresh
             </button>
-            <button
-              type="button"
-              disabled={waBusy}
-              onClick={() => void sendTestWhatsApp()}
-              title="Test WhatsApp"
-              className="hidden min-h-10 rounded-xl bg-white/10 px-3 py-2 text-sm text-[#d7e8de] transition hover:bg-white/15 disabled:opacity-50 lg:inline-flex"
-            >
-              {waBusy ? "…" : "WA"}
-            </button>
           </div>
         </div>
       </header>
-
-      {waMsg ? (
-        <div className="safe-pad-x border-b border-[#b7e0d8] bg-[#e8f7f4] py-2 text-sm text-[#0f5c52]">
-          {waMsg}
-        </div>
-      ) : null}
 
       {(data?.errors?.length || data?.error) && (
         <div className="safe-pad-x border-b border-[#f0c9a0] bg-[#fff7ed] py-2.5 text-sm text-[#7a3f10]">
