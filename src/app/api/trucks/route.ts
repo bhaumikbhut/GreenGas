@@ -1,11 +1,12 @@
 import { after, NextResponse } from "next/server";
 import { FACTORY_POINTS } from "@/lib/factory-points";
 import { LOADING_POINTS } from "@/lib/loading-points";
-import { readFleetSnapshot } from "@/lib/fleet-cache";
+import { readFleetSnapshot, snapshotAgeSec } from "@/lib/fleet-cache";
 import type { FleetSnapshot, TruckSnapshot } from "@/lib/fleet-types";
 import {
   isSnapshotFresh,
   refreshFleetCache,
+  refreshFleetLiveGps,
   withCacheMeta,
 } from "@/lib/refresh-fleet";
 
@@ -105,21 +106,50 @@ async function waitForCachedSnapshot(
   return null;
 }
 
+/** Wait until Turso/file snapshot is newer than `minFetchedAt`. */
+async function waitForFresherSnapshot(
+  minFetchedAt: string | null,
+  attempts = 40,
+  delayMs = 500,
+): Promise<FleetSnapshot | null> {
+  const minTs = minFetchedAt ? Date.parse(minFetchedAt) : 0;
+  for (let i = 0; i < attempts; i++) {
+    const cached = await readFleetSnapshot();
+    if (cached && cached.trucks.length > 0) {
+      const t = Date.parse(cached.fetchedAt);
+      if (!minTs || (Number.isFinite(t) && t > minTs)) return cached;
+      if (snapshotAgeSec(cached) < 3) return cached;
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return readFleetSnapshot();
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const imeiFilter = searchParams.get("imei")?.trim() || null;
   const forceLive = searchParams.get("live") === "1";
 
   if (forceLive) {
-    const result = await refreshFleetCache();
+    const before = await readFleetSnapshot();
+    const result = await refreshFleetLiveGps();
     if (result.snapshot) {
+      // WhatsApp-capable full rebuild occasionally (live path skips alerts).
+      after(() => {
+        if (!before || snapshotAgeSec(before) > 300) {
+          void refreshFleetCache();
+        }
+      });
       return NextResponse.json(
         filterSnapshot(withCacheMeta(result.snapshot, false), imeiFilter),
       );
     }
-    // Lock held — serve cache (wait briefly if still warming).
-    const cachedLive =
-      (await readFleetSnapshot()) || (await waitForCachedSnapshot(40, 500));
+    // Lock held — wait for the in-flight refresh to write a newer snapshot.
+    const cachedLive = await waitForFresherSnapshot(
+      before?.fetchedAt ?? null,
+      24,
+      500,
+    );
     if (cachedLive && cachedLive.trucks.length > 0) {
       return NextResponse.json(
         filterSnapshot(withCacheMeta(cachedLive, true), imeiFilter),

@@ -2,7 +2,7 @@
 
 import { MapContainer, TileLayer, Circle, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { TruckSnapshot } from "@/app/api/trucks/route";
 import type { FactoryPoint } from "@/lib/factory-points";
 import type { LoadingPoint } from "@/lib/loading-points";
@@ -62,13 +62,13 @@ function plateLabelHtml(plate: string, status: string): string {
   );
 }
 
-/** Status-colored dot + number plate. */
+/** Status-colored dot + number plate (+ heading tip when moving). */
 function truckMarkerIcon(
   status: string,
   plate: string,
   selected = false,
-  _course = 0,
-  _speed = 0,
+  course = 0,
+  speed = 0,
 ) {
   const color = statusColor(status);
   const size = selected ? 34 : 28;
@@ -80,10 +80,15 @@ function truckMarkerIcon(
   const ring = selected
     ? `<circle cx="${cx}" cy="${cy}" r="14" fill="none" stroke="${color}" stroke-width="2.5" opacity=".45"/>`
     : "";
+  const heading =
+    speed > 5
+      ? `<polygon points="16,2 11,10 21,10" fill="#fff" stroke="${color}" stroke-width="1" transform="rotate(${course} 16 16)"/>`
+      : "";
 
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 32 32" overflow="visible">` +
     ring +
+    heading +
     `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" stroke="#fff" stroke-width="3"/>` +
     `</svg>`;
 
@@ -109,6 +114,128 @@ function truckIcon(
   speed: number,
 ) {
   return truckMarkerIcon(status, plate, selected, course, speed);
+}
+
+/**
+ * Smooth pin motion: ease to each GPS fix, crawl along course/speed between
+ * polls so moving trucks don’t look frozen on the map.
+ */
+function MovingTruckMarker({
+  truck,
+  selected,
+  mode,
+  onSelect,
+  children,
+}: {
+  truck: TruckSnapshot;
+  selected: boolean;
+  mode: "fleet" | "live";
+  onSelect?: (imei: string) => void;
+  children?: ReactNode;
+}) {
+  const markerRef = useRef<L.Marker | null>(null);
+  const displayRef = useRef<{ lat: number; lng: number } | null>(
+    truck.lat != null && truck.lng != null
+      ? { lat: truck.lat, lng: truck.lng }
+      : null,
+  );
+  const targetRef = useRef(displayRef.current);
+  const metaRef = useRef({
+    speed: truck.speed,
+    course: truck.course,
+  });
+  const [iconTick, setIconTick] = useState(0);
+
+  useEffect(() => {
+    if (truck.lat == null || truck.lng == null) return;
+    targetRef.current = { lat: truck.lat, lng: truck.lng };
+    metaRef.current = { speed: truck.speed, course: truck.course };
+    if (!displayRef.current) {
+      displayRef.current = { lat: truck.lat, lng: truck.lng };
+      markerRef.current?.setLatLng([truck.lat, truck.lng]);
+    }
+    setIconTick((n) => n + 1);
+  }, [truck.lat, truck.lng, truck.speed, truck.course, truck.gpstime]);
+
+  useEffect(() => {
+    let raf = 0;
+    let last = performance.now();
+
+    const frame = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const cur = displayRef.current;
+      const target = targetRef.current;
+      if (cur && target) {
+        const dlat = target.lat - cur.lat;
+        const dlng = target.lng - cur.lng;
+        const distM = Math.sqrt(
+          (dlat * 111_000) ** 2 +
+            (dlng * 111_000 * Math.cos((cur.lat * Math.PI) / 180)) ** 2,
+        );
+        const alpha = 1 - Math.exp(-((distM > 200 ? 3 : 2) * dt));
+        let lat = cur.lat + dlat * alpha;
+        let lng = cur.lng + dlng * alpha;
+
+        const { speed, course } = metaRef.current;
+        if (speed > 5 && distM < 45) {
+          const meters = ((speed * 1000) / 3600) * dt;
+          const rad = (course * Math.PI) / 180;
+          lat += (meters / 111_000) * Math.cos(rad);
+          lng +=
+            (meters / (111_000 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)))) *
+            Math.sin(rad);
+          targetRef.current = { lat, lng };
+        }
+
+        displayRef.current = { lat, lng };
+        markerRef.current?.setLatLng([lat, lng]);
+      }
+      raf = requestAnimationFrame(frame);
+    };
+
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const icon = useMemo(
+    () =>
+      truckIcon(
+        mode,
+        truck.status,
+        truck.plate,
+        selected,
+        truck.course,
+        truck.speed,
+      ),
+    // iconTick refreshes when GPS meta changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      mode,
+      truck.status,
+      truck.plate,
+      selected,
+      truck.course,
+      truck.speed,
+      iconTick,
+    ],
+  );
+
+  if (truck.lat == null || truck.lng == null) return null;
+
+  return (
+    <Marker
+      ref={markerRef}
+      position={[truck.lat, truck.lng]}
+      icon={icon}
+      zIndexOffset={selected ? 1000 : truck.speed > 5 ? 200 : 0}
+      eventHandlers={{
+        click: () => onSelect?.(truck.imei),
+      }}
+    >
+      {children}
+    </Marker>
+  );
 }
 
 function FitBounds({
@@ -183,6 +310,7 @@ function FocusTruck({
   mode?: "fleet" | "live";
 }) {
   const map = useMap();
+  const lastFocusToken = useRef(focusToken);
 
   useEffect(() => {
     if (!selectedImei) return;
@@ -196,15 +324,21 @@ function FocusTruck({
       return;
     }
 
-    const zoom = mode === "live" ? 15 : 15;
+    const zoom = 15;
+    const hardFocus = lastFocusToken.current !== focusToken;
+    lastFocusToken.current = focusToken;
+
     const go = () => {
       map.invalidateSize({ animate: false });
       const size = map.getSize();
       if (!size.x || !size.y) return false;
-      if (mode === "live") {
-        map.setView([selected.lat!, selected.lng!], zoom, { animate: true });
-      } else {
+      if (hardFocus || mode === "live") {
         map.flyTo([selected.lat!, selected.lng!], zoom, { duration: 0.7 });
+      } else {
+        map.panTo([selected.lat!, selected.lng!], {
+          animate: true,
+          duration: 0.8,
+        });
       }
       return true;
     };
@@ -380,21 +514,12 @@ export default function TruckMap({
       ))}
       {trucks.map((t) =>
         t.lat != null && t.lng != null ? (
-          <Marker
+          <MovingTruckMarker
             key={t.imei}
-            position={[t.lat, t.lng]}
-            icon={truckIcon(
-              mode,
-              t.status,
-              t.plate,
-              t.imei === selectedImei,
-              t.course,
-              t.speed,
-            )}
-            zIndexOffset={t.imei === selectedImei ? 1000 : t.speed > 5 ? 200 : 0}
-            eventHandlers={{
-              click: () => onSelectImei?.(t.imei),
-            }}
+            truck={t}
+            selected={t.imei === selectedImei}
+            mode={mode}
+            onSelect={onSelectImei}
           >
             <Popup>
               <strong>{t.plate}</strong>
@@ -442,7 +567,7 @@ export default function TruckMap({
                 </>
               ) : null}
             </Popup>
-          </Marker>
+          </MovingTruckMarker>
         ) : null,
       )}
     </MapContainer>

@@ -1,4 +1,5 @@
 import { FACTORY_POINTS } from "@/lib/factory-points";
+import { readFleetSnapshot } from "@/lib/fleet-cache";
 import {
   findNearestFactoryPoint,
   findNearestLoadingPoint,
@@ -93,8 +94,145 @@ async function loadFromPortal(): Promise<{
   };
 }
 
+export type BuildFleetOptions = {
+  /** Skip WhatsApp + notification I/O (use for frequent live map refreshes). */
+  skipAlerts?: boolean;
+};
+
+/**
+ * Fast path for map pins: pull ProTrack GPS and patch lat/lng/speed onto the
+ * last snapshot. Skips WhatsApp and full status recomputation so Vercel stays
+ * under the 60s limit (full builds often 504 from iad1 → ProTrack latency).
+ */
+export async function patchFleetLiveGps(): Promise<FleetSnapshot | null> {
+  const prev = await readFleetSnapshot();
+
+  const portal = await loadFromPortal();
+  if (portal.devices.length === 0) {
+    if (prev?.trucks.length) {
+      return {
+        ...prev,
+        fetchedAt: new Date().toISOString(),
+        errors: portal.errors.length ? portal.errors : prev.errors,
+        accountsUsed: portal.accountsUsed.length
+          ? portal.accountsUsed
+          : prev.accountsUsed,
+      };
+    }
+    return null;
+  }
+
+  if (!prev?.trucks.length) {
+    return buildFleetSnapshot({ skipAlerts: true });
+  }
+
+  const byImei = new Map(prev.trucks.map((t) => [t.imei, t]));
+  const trucks: TruckSnapshot[] = [];
+
+  for (const device of portal.devices) {
+    const track = portal.tracksByImei.get(device.imei);
+    const prevTruck = byImei.get(device.imei);
+    const online = track ? isOnline(track.datastatus) : false;
+    const hasFix =
+      track != null &&
+      Number.isFinite(track.latitude) &&
+      Number.isFinite(track.longitude) &&
+      !(track.latitude === 0 && track.longitude === 0);
+
+    if (prevTruck) {
+      trucks.push({
+        ...prevTruck,
+        plate: device.plate || prevTruck.plate,
+        name: device.name || prevTruck.name,
+        lat: hasFix ? track!.latitude : prevTruck.lat,
+        lng: hasFix ? track!.longitude : prevTruck.lng,
+        speed: track?.speed ?? 0,
+        course: track?.course ?? prevTruck.course,
+        gpstime: track?.gpstime ? track.gpstime * 1000 : prevTruck.gpstime,
+        online: Boolean(track) && online,
+      });
+      byImei.delete(device.imei);
+    } else if (hasFix && track) {
+      // New device not in cache yet — show as on-road until full refresh.
+      trucks.push({
+        imei: device.imei,
+        plate: device.plate,
+        name: device.name,
+        productLine: device.accountLabel,
+        account: device.account,
+        lat: track.latitude,
+        lng: track.longitude,
+        speed: track.speed ?? 0,
+        course: track.course ?? 0,
+        gpstime: track.gpstime ? track.gpstime * 1000 : null,
+        online,
+        status: online ? "ON_ROAD" : "OFFLINE",
+        loadingPoint: null,
+        parkingPoint: null,
+        factoryPoint: null,
+        port: null,
+        distanceM: null,
+        cargo: "EMPTY",
+        lastLoadedFrom: null,
+        lastFactory: null,
+        lastPark: null,
+      });
+    }
+  }
+
+  // Keep any cached trucks ProTrack omitted this pull (don't flash-remove).
+  for (const leftover of byImei.values()) trucks.push(leftover);
+  trucks.sort((a, b) => a.plate.localeCompare(b.plate));
+
+  const statusCounts = {
+    PARK: 0,
+    LOADING: 0,
+    LOADED: 0,
+    AT_FACTORY: 0,
+    EMPTY: 0,
+    ON_ROAD: 0,
+    OFFLINE: 0,
+  };
+  for (const t of trucks) {
+    if (t.status in statusCounts) {
+      statusCounts[t.status as keyof typeof statusCounts] += 1;
+    }
+  }
+
+  return {
+    ...prev,
+    ok: true,
+    fetchedAt: new Date().toISOString(),
+    gpsSource: portal.source,
+    accountsUsed: portal.accountsUsed,
+    productCounts: {
+      LPG: trucks.filter((t) => t.productLine === "LPG").length,
+      PROPANE: trucks.filter((t) => t.productLine === "PROPANE").length,
+    },
+    statusCounts,
+    statusCountTotal:
+      statusCounts.PARK +
+      statusCounts.LOADING +
+      statusCounts.LOADED +
+      statusCounts.AT_FACTORY +
+      statusCounts.EMPTY +
+      statusCounts.ON_ROAD +
+      statusCounts.OFFLINE,
+    errors: portal.errors,
+    alerts: [],
+    truckCount: trucks.length,
+    trucks,
+    loadingPoints: LOADING_POINTS,
+    factoryPoints: FACTORY_POINTS,
+    factoryCount: FACTORY_POINTS.length,
+  };
+}
+
 /** Pull ProTrack, update geofence memory / WhatsApp, return API snapshot. */
-export async function buildFleetSnapshot(): Promise<FleetSnapshot> {
+export async function buildFleetSnapshot(
+  options: BuildFleetOptions = {},
+): Promise<FleetSnapshot> {
+  const skipAlerts = Boolean(options.skipAlerts);
   const accounts = getConfiguredAccounts();
   if (accounts.length === 0) {
     return {
@@ -207,7 +345,7 @@ export async function buildFleetSnapshot(): Promise<FleetSnapshot> {
         String(prev?.status ?? "") !== "AT_FACTORY"
       );
 
-    if (shouldAlert) {
+    if (shouldAlert && !skipAlerts) {
       const locationName =
         insideLoading?.point.name ||
         insideParking?.point.name ||

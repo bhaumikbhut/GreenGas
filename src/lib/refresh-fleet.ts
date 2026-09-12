@@ -35,6 +35,28 @@ export async function refreshFleetCache(): Promise<{
   }
 }
 
+/**
+ * Live map/status refresh: full geofence + status (Factory/Empty/Park/…) but
+ * skip WhatsApp so Vercel stays under 60s. GPS-only patch left statuses frozen.
+ */
+export async function refreshFleetLiveGps(): Promise<{
+  snapshot: FleetSnapshot | null;
+  skipped: boolean;
+}> {
+  const locked = await tryAcquireRefreshLock(50);
+  if (!locked) {
+    return { snapshot: null, skipped: true };
+  }
+
+  try {
+    const snapshot = await buildFleetSnapshot({ skipAlerts: true });
+    await writeFleetSnapshot(snapshot);
+    return { snapshot, skipped: false };
+  } finally {
+    await releaseRefreshLock();
+  }
+}
+
 export function withCacheMeta(
   snapshot: FleetSnapshot,
   hit: boolean,

@@ -243,10 +243,10 @@ export function FleetProvider({ children }: { children: ReactNode }) {
       await refresh();
       await refreshLive();
     })();
-    // Cache read often (picks up background ProTrack refreshes quickly).
-    const fast = setInterval(() => void refresh(), 30000);
-    // Live ProTrack pull — dots move with real GPS (not a static cache pin).
-    const live = setInterval(() => void refreshLive(), 60000);
+    // Cache read as fallback; live GPS patch is the main mover.
+    const fast = setInterval(() => void refresh(), 45000);
+    // Live GPS patch — must stay under Vercel 60s (positions only).
+    const live = setInterval(() => void refreshLive(), 20000);
     const onVisible = () => {
       if (document.visibilityState === "visible") void refreshLive();
     };
