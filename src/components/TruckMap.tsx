@@ -17,6 +17,7 @@ type Props = {
   focusToken?: number;
   /** fleet = pin icons; live = rotating top-down vehicle (Uber-style tracking). */
   mode?: "fleet" | "live";
+  onSelectImei?: (imei: string) => void;
 };
 
 function statusColor(status: string): string {
@@ -252,6 +253,7 @@ export default function TruckMap({
   selectedImei,
   focusToken = 0,
   mode = "fleet",
+  onSelectImei,
 }: Props) {
   return (
     <MapContainer
@@ -343,6 +345,9 @@ export default function TruckMap({
               t.speed,
             )}
             zIndexOffset={t.imei === selectedImei ? 1000 : t.speed > 5 ? 200 : 0}
+            eventHandlers={{
+              click: () => onSelectImei?.(t.imei),
+            }}
           >
             <Popup>
               <strong>{t.plate}</strong>
