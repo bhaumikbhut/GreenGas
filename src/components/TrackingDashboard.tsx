@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TruckSnapshot } from "@/app/api/trucks/route";
 import type { FactoryPoint } from "@/lib/factory-points";
-import type { LoadingPoint } from "@/lib/loading-points";
+import { PARKING_POINTS, type LoadingPoint } from "@/lib/loading-points";
 import { statusBadge } from "@/lib/status-label";
 
 const TruckMap = dynamic(() => import("@/components/TruckMap"), {
@@ -115,6 +115,7 @@ export default function TrackingDashboard() {
   const [productFilter, setProductFilter] = useState<"ALL" | "LPG" | "PROPANE">(
     "ALL",
   );
+  const [parkingFilter, setParkingFilter] = useState<string>("ALL");
   const [mobileTab, setMobileTab] = useState<MobileTab>("map");
   const [focusToken, setFocusToken] = useState(0);
 
@@ -171,12 +172,42 @@ export default function TrackingDashboard() {
   }, [refresh, refreshLive]);
 
   const trucks = useMemo(() => data?.trucks ?? [], [data]);
+
+  const parkingOptions = useMemo(() => {
+    const fromConfig = PARKING_POINTS.map((p) => p.name);
+    // Also include any live names not in config (renamed pins, etc.)
+    const live = new Set<string>();
+    for (const t of trucks) {
+      if (t.parkingPoint) live.add(t.parkingPoint);
+      if (t.lastPark) live.add(t.lastPark);
+    }
+    const extras = [...live].filter((n) => !fromConfig.includes(n)).sort();
+    return [...fromConfig, ...extras];
+  }, [trucks]);
+
+  const parkingCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const name of parkingOptions) c[name] = 0;
+    for (const t of trucks) {
+      if (t.status !== "PARK") continue;
+      const key = t.parkingPoint || t.lastPark;
+      if (!key) continue;
+      c[key] = (c[key] ?? 0) + 1;
+    }
+    return c;
+  }, [trucks, parkingOptions]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return trucks.filter((t) => {
       if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
       if (productFilter !== "ALL" && t.productLine !== productFilter)
         return false;
+      if (parkingFilter !== "ALL" && statusFilter === "PARK") {
+        const at =
+          t.parkingPoint === parkingFilter || t.lastPark === parkingFilter;
+        if (!at) return false;
+      }
       if (!q) return true;
       return (
         t.plate.toLowerCase().includes(q) ||
@@ -184,7 +215,7 @@ export default function TrackingDashboard() {
         t.productLine.toLowerCase().includes(q)
       );
     });
-  }, [trucks, query, statusFilter, productFilter]);
+  }, [trucks, query, statusFilter, productFilter, parkingFilter]);
 
   const counts = useMemo(() => {
     if (data?.statusCounts) {
@@ -251,7 +282,13 @@ export default function TrackingDashboard() {
             <button
               key={key}
               type="button"
-              onClick={() => setStatusFilter((s) => (s === key ? "ALL" : key))}
+              onClick={() =>
+                setStatusFilter((s) => {
+                  const next = s === key ? "ALL" : key;
+                  if (next !== "PARK") setParkingFilter("ALL");
+                  return next;
+                })
+              }
               className={`min-h-[3.25rem] rounded-xl px-1 py-2 text-center transition ${meta.chip} ${
                 on ? "ring-2 ring-[var(--gg-forest)] ring-offset-1" : "opacity-90"
               }`}
@@ -296,6 +333,27 @@ export default function TrackingDashboard() {
           </button>
         ))}
       </div>
+
+      {statusFilter === "PARK" ? (
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-[var(--gg-muted)]">
+            Parking
+          </span>
+          <select
+            value={parkingFilter}
+            onChange={(e) => setParkingFilter(e.target.value)}
+            className="w-full appearance-none rounded-xl border border-[var(--gg-line)] bg-[var(--gg-bg)] py-3 pl-3 pr-9 text-base outline-none transition focus:border-[var(--gg-green)] sm:py-2.5 sm:text-sm"
+          >
+            <option value="ALL">All parking locations</option>
+            {parkingOptions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+                {parkingCounts[name] ? ` (${parkingCounts[name]})` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       <label className="relative block">
         <span className="sr-only">Search trucks</span>
