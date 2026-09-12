@@ -101,10 +101,13 @@ export function extractPinEvents(
   lastEnterFactory: PinHit | null;
   lastLeavePark: PinHit | null;
   lastEnterPark: PinHit | null;
+  /** Factory leave only if the truck dwelled (not a drive-by). */
+  lastRealFactoryLeave: PinHit | null;
   stillInLoad: PinHit | null;
   stillInFactory: PinHit | null;
   stillInPark: PinHit | null;
 } {
+  const MIN_FACTORY_DWELL_SEC = 15 * 60;
   let inLoad: PinHit | null = null;
   let inFac: PinHit | null = null;
   let inPark: PinHit | null = null;
@@ -114,6 +117,8 @@ export function extractPinEvents(
   let lastEnterFactory: PinHit | null = null;
   let lastLeavePark: PinHit | null = null;
   let lastEnterPark: PinHit | null = null;
+  let lastRealFactoryLeave: PinHit | null = null;
+  let factoryEnterAt = 0;
 
   for (const p of points) {
     const atSec = toSec(p.gpstime);
@@ -144,10 +149,15 @@ export function extractPinEvents(
           atSec,
         };
         lastEnterFactory = inFac;
+        factoryEnterAt = atSec;
       }
     } else if (inFac) {
       lastLeaveFactory = { ...inFac, atSec };
+      if (atSec - factoryEnterAt >= MIN_FACTORY_DWELL_SEC) {
+        lastRealFactoryLeave = { ...inFac, atSec };
+      }
       inFac = null;
+      factoryEnterAt = 0;
     }
 
     if (P) {
@@ -173,6 +183,7 @@ export function extractPinEvents(
     lastEnterFactory,
     lastLeavePark,
     lastEnterPark,
+    lastRealFactoryLeave,
     stillInLoad: inLoad,
     stillInFactory: inFac,
     stillInPark: inPark,
@@ -207,7 +218,8 @@ export function memoryFromLiveAndHistory(params: {
   );
   const filled =
     lastPortLeaveAt > 0 &&
-    (!ev.lastLeaveFactory || lastPortLeaveAt >= ev.lastLeaveFactory.atSec);
+    (!ev.lastRealFactoryLeave ||
+      lastPortLeaveAt >= ev.lastRealFactoryLeave.atSec);
 
   const insideLoading =
     params.lat != null && params.lng != null
