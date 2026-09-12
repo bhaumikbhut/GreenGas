@@ -1,81 +1,54 @@
 import { NextResponse } from "next/server";
 import { readFleetSnapshot } from "@/lib/fleet-cache";
 import {
-  completeTrip,
-  fillUnknownLoadedFrom,
   listTrips,
-  markTripArrived,
-  openTrip,
+  reconcileTripsFromFleet,
+  type Trip,
   type TripStatus,
 } from "@/lib/trips";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/**
- * Keep trips history aligned with live fleet snapshot:
- * - open / arrive from LOADED + AT_FACTORY
- * - fill Unknown loading point when fleet knows the bay
- * - close open trips when truck is empty again (left factory / not filled)
- */
-async function seedFromLiveFleet(): Promise<void> {
-  const snap = await readFleetSnapshot();
-  if (!snap?.trucks?.length) return;
+function filterTrips(
+  all: Trip[],
+  opts: {
+    plate?: string;
+    port?: string;
+    factory?: string;
+    imei?: string;
+    status?: TripStatus | "ALL";
+    limit: number;
+  },
+): Trip[] {
+  const plateQ = opts.plate?.trim().toLowerCase();
+  const portQ = opts.port?.trim().toLowerCase();
+  const factoryQ = opts.factory?.trim().toLowerCase();
+  const statusQ =
+    opts.status && opts.status !== "ALL" ? opts.status : null;
+  const imeiQ = opts.imei?.trim();
 
-  for (const t of snap.trucks) {
-    if (t.lastLoadedFrom) {
-      await fillUnknownLoadedFrom({
-        imei: t.imei,
-        loadedFrom: t.lastLoadedFrom,
-        port: t.port,
-      });
-    }
-
-    if (t.status === "LOADED" && t.lastLoadedFrom) {
-      await openTrip({
-        imei: t.imei,
-        plate: t.plate,
-        productLine: t.productLine,
-        port: t.port,
-        loadedFrom: t.lastLoadedFrom,
-        at: snap.fetchedAt,
-      });
-      continue;
-    }
-
-    if (t.status === "AT_FACTORY" && t.lastFactory) {
-      await openTrip({
-        imei: t.imei,
-        plate: t.plate,
-        productLine: t.productLine,
-        port: t.port,
-        loadedFrom: t.lastLoadedFrom || "Unknown loading point",
-        at: snap.fetchedAt,
-      });
-      await markTripArrived({
-        imei: t.imei,
-        factory: t.lastFactory,
-        at: snap.fetchedAt,
-      });
-      continue;
-    }
-
-    // Live empty / parking / loading → any open trip should be closed
-    if (
-      t.status === "ON_ROAD" ||
-      t.status === "PARK" ||
-      t.status === "LOADING" ||
-      t.status === "EMPTY"
-    ) {
-      await completeTrip({
-        imei: t.imei,
-        factory: t.lastFactory,
-        at: snap.fetchedAt,
-      });
-    }
-  }
+  return all
+    .filter((t) => {
+      if (imeiQ && t.imei !== imeiQ) return false;
+      if (statusQ && t.status !== statusQ) return false;
+      if (plateQ && !t.plate.toLowerCase().includes(plateQ)) return false;
+      if (portQ) {
+        const hay = `${t.port ?? ""} ${t.loadedFrom}`.toLowerCase();
+        if (!hay.includes(portQ)) return false;
+      }
+      if (factoryQ && !(t.factory ?? "").toLowerCase().includes(factoryQ)) {
+        return false;
+      }
+      return true;
+    })
+    .slice(0, opts.limit);
 }
 
+/**
+ * Fast trips list (one Turso read).
+ * Optional ?seed=1 runs a batched fleet reconcile (still one extra write).
+ */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const limit = Number(searchParams.get("limit") || 150);
@@ -92,31 +65,44 @@ export async function GET(request: Request) {
       ? (statusRaw as TripStatus | "ALL")
       : "ALL";
 
-  if (searchParams.get("seed") !== "0") {
+  let seed: {
+    opened: number;
+    arrived: number;
+    completed: number;
+    filledUnknown: number;
+  } | null = null;
+
+  if (searchParams.get("seed") === "1") {
     try {
-      await seedFromLiveFleet();
+      const snap = await readFleetSnapshot();
+      if (snap?.trucks?.length) {
+        seed = await reconcileTripsFromFleet(snap.trucks, snap.fetchedAt);
+      }
     } catch {
-      // ignore seed errors — still return stored trips
+      // still return trips
     }
   }
 
-  const trips = await listTrips({
-    limit: Number.isFinite(limit) ? limit : 150,
+  // Single KV read for list + counts
+  const all = await listTrips({ limit: 800, status: "ALL" });
+  const trips = filterTrips(all, {
     plate,
     port,
     factory,
     imei,
     status,
+    limit: Number.isFinite(limit) ? limit : 150,
   });
 
-  const inTransit = trips.filter((t) => t.status === "IN_TRANSIT").length;
-  const atFactory = trips.filter((t) => t.status === "AT_FACTORY").length;
-  const delivered = trips.filter((t) => t.status === "DELIVERED").length;
+  const inTransit = all.filter((t) => t.status === "IN_TRANSIT").length;
+  const atFactory = all.filter((t) => t.status === "AT_FACTORY").length;
+  const delivered = all.filter((t) => t.status === "DELIVERED").length;
 
   return NextResponse.json({
     ok: true,
     count: trips.length,
     counts: { inTransit, atFactory, delivered },
     trips,
+    ...(seed ? { seed } : {}),
   });
 }

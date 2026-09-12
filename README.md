@@ -29,6 +29,9 @@ AT_FACTORY  → leave factory → ON_ROAD    (empty)
 
 - Out of **loading** → filled (`LOADED`)
 - Out of **factory** → empty (`ON_ROAD`)
+- Filled truck **long stop** far from port, outside known pins → **Unknown factory**
+  - Engine OFF: ~45 min · Engine ON: ~2 h · Must be ≥20 km from loading/parking
+  - Short dinner / tea / brief breakdown stays **Filled road** (LOADED)
 - **Live map** and **Trips** stay in sync: every live GPS refresh updates status memory + opens/arrives/closes trips
 - One-time catch-up: `npx tsx scripts/heal-from-playback.ts` (portal history → statuses + Filled-at names)
 - Each loading/parking pin has its **own radius** (Neel field pins, Sep 2026)  

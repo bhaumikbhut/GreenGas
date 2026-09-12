@@ -223,3 +223,144 @@ export async function listTrips(query: TripQuery = {}): Promise<Trip[]> {
 
   return trips.slice(0, limit);
 }
+
+type FleetTruckLike = {
+  imei: string;
+  plate: string;
+  productLine: "LPG" | "PROPANE";
+  status: string;
+  port: string | null;
+  lastLoadedFrom: string | null;
+  lastFactory: string | null;
+};
+
+/**
+ * One read + one write reconcile of trips vs live fleet.
+ * Use this instead of per-truck open/complete on page load (those hammer Turso).
+ */
+export async function reconcileTripsFromFleet(
+  trucks: FleetTruckLike[],
+  at?: string,
+): Promise<{ opened: number; arrived: number; completed: number; filledUnknown: number }> {
+  const when = at || new Date().toISOString();
+  const trips = await readAll();
+  const openByImei = new Map<string, Trip>();
+  for (const t of trips) {
+    if (t.status !== "DELIVERED" && !openByImei.has(t.imei)) {
+      openByImei.set(t.imei, t);
+    }
+  }
+
+  let opened = 0;
+  let arrived = 0;
+  let completed = 0;
+  let filledUnknown = 0;
+  let dirty = false;
+
+  for (const truck of trucks) {
+    if (truck.lastLoadedFrom && !isUnknownLoadedFrom(truck.lastLoadedFrom)) {
+      for (const t of trips) {
+        if (t.imei !== truck.imei) continue;
+        if (!isUnknownLoadedFrom(t.loadedFrom)) continue;
+        t.loadedFrom = truck.lastLoadedFrom;
+        if (truck.port) t.port = truck.port;
+        filledUnknown += 1;
+        dirty = true;
+      }
+    }
+
+    const open = openByImei.get(truck.imei);
+
+    if (truck.status === "LOADED" && truck.lastLoadedFrom) {
+      if (!open) {
+        const trip: Trip = {
+          id: newId(),
+          imei: truck.imei,
+          plate: truck.plate,
+          productLine: truck.productLine,
+          port: truck.port,
+          loadedFrom: isUnknownLoadedFrom(truck.lastLoadedFrom)
+            ? "Unknown loading point"
+            : truck.lastLoadedFrom,
+          factory: null,
+          status: "IN_TRANSIT",
+          loadedAt: when,
+          arrivedAt: null,
+          departedAt: null,
+        };
+        trips.unshift(trip);
+        openByImei.set(truck.imei, trip);
+        opened += 1;
+        dirty = true;
+      } else if (
+        isUnknownLoadedFrom(open.loadedFrom) &&
+        !isUnknownLoadedFrom(truck.lastLoadedFrom)
+      ) {
+        open.loadedFrom = truck.lastLoadedFrom;
+        open.port = truck.port ?? open.port;
+        dirty = true;
+      }
+      continue;
+    }
+
+    if (truck.status === "AT_FACTORY" && truck.lastFactory) {
+      if (!open) {
+        const trip: Trip = {
+          id: newId(),
+          imei: truck.imei,
+          plate: truck.plate,
+          productLine: truck.productLine,
+          port: truck.port,
+          loadedFrom: truck.lastLoadedFrom || "Unknown loading point",
+          factory: truck.lastFactory,
+          status: "AT_FACTORY",
+          loadedAt: when,
+          arrivedAt: when,
+          departedAt: null,
+        };
+        trips.unshift(trip);
+        openByImei.set(truck.imei, trip);
+        opened += 1;
+        arrived += 1;
+        dirty = true;
+      } else {
+        if (
+          isUnknownLoadedFrom(open.loadedFrom) &&
+          truck.lastLoadedFrom &&
+          !isUnknownLoadedFrom(truck.lastLoadedFrom)
+        ) {
+          open.loadedFrom = truck.lastLoadedFrom;
+          open.port = truck.port ?? open.port;
+          dirty = true;
+        }
+        if (open.status !== "AT_FACTORY" || open.factory !== truck.lastFactory) {
+          open.status = "AT_FACTORY";
+          open.factory = truck.lastFactory;
+          open.arrivedAt = open.arrivedAt || when;
+          arrived += 1;
+          dirty = true;
+        }
+      }
+      continue;
+    }
+
+    if (
+      open &&
+      (truck.status === "ON_ROAD" ||
+        truck.status === "PARK" ||
+        truck.status === "LOADING" ||
+        truck.status === "EMPTY")
+    ) {
+      open.status = "DELIVERED";
+      open.factory = truck.lastFactory || open.factory;
+      open.arrivedAt = open.arrivedAt || when;
+      open.departedAt = when;
+      openByImei.delete(truck.imei);
+      completed += 1;
+      dirty = true;
+    }
+  }
+
+  if (dirty) await writeAll(trips);
+  return { opened, arrived, completed, filledUnknown };
+}

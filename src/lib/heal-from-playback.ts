@@ -67,6 +67,9 @@ export function replayPlaybackPoints(
       insideFactory,
       online: true,
       now,
+      lat: p.latitude,
+      lng: p.longitude,
+      speed: p.speed,
     });
     if (memory.status !== prev.status) {
       transitions.push({
@@ -125,10 +128,13 @@ function applyMemoryToTruck(
     const F = findNearestFactoryPoint(truck.lat, truck.lng, radiusM);
     truck.loadingPoint = L?.point.name ?? null;
     truck.parkingPoint = P?.point.name ?? null;
-    truck.factoryPoint = F?.point.name ?? null;
-    truck.distanceM = Math.round(
-      L?.distanceM ?? P?.distanceM ?? F?.distanceM ?? 0,
-    ) || null;
+    truck.factoryPoint =
+      F?.point.name ??
+      (memory.status === "AT_FACTORY"
+        ? memory.lastFactory || "Unknown factory"
+        : null);
+    truck.distanceM =
+      Math.round(L?.distanceM ?? P?.distanceM ?? F?.distanceM ?? 0) || null;
   }
 }
 

@@ -135,6 +135,12 @@ export function secondaryLine(t: TruckSnapshot): string | null {
   if (t.status === "AT_FACTORY" && t.factoryPoint) {
     return `At ${t.factoryPoint}`;
   }
+  if (t.status === "AT_FACTORY" && t.lastFactory) {
+    return `At ${t.lastFactory}`;
+  }
+  if (t.status === "AT_FACTORY") {
+    return "At Unknown factory";
+  }
   if (t.status === "ON_ROAD" && t.lastFactory) {
     return `Empty · left ${t.lastFactory}`;
   }

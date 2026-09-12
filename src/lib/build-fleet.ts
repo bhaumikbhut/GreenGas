@@ -32,6 +32,7 @@ import {
   fillUnknownLoadedFrom,
   markTripArrived,
   openTrip,
+  reconcileTripsFromFleet,
 } from "@/lib/trips";
 
 const ALERT_STATUSES = new Set<AutoStatus>([
@@ -338,6 +339,10 @@ export async function buildFleetSnapshot(
       insideParking,
       insideFactory,
       online: Boolean(track) && online,
+      lat: hasFix ? track!.latitude : null,
+      lng: hasFix ? track!.longitude : null,
+      speed: track?.speed ?? null,
+      accstatus: track?.accstatus ?? null,
     });
 
     const prevNorm = prev ? normalizeMemory(prev) : null;
@@ -499,7 +504,11 @@ export async function buildFleetSnapshot(
       status: memory.status,
       loadingPoint: insideLoading?.point.name ?? null,
       parkingPoint: insideParking?.point.name ?? null,
-      factoryPoint: insideFactory?.point.name ?? null,
+      factoryPoint:
+        insideFactory?.point.name ??
+        (memory.status === "AT_FACTORY"
+          ? memory.lastFactory || "Unknown factory"
+          : null),
       port:
         insideLoading?.point.port ??
         insideParking?.point.port ??
@@ -528,6 +537,13 @@ export async function buildFleetSnapshot(
     if (t.status in statusCounts) {
       statusCounts[t.status as keyof typeof statusCounts] += 1;
     }
+  }
+
+  // Keep trips history aligned with final statuses (one Turso round-trip).
+  try {
+    await reconcileTripsFromFleet(trucks);
+  } catch {
+    // Don't fail the fleet snapshot if trips KV blips
   }
 
   const lpgCount = trucks.filter((t) => t.productLine === "LPG").length;

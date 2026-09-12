@@ -11,8 +11,9 @@ import {
  *   PARK → leave parking         → ON_ROAD
  *   PARK/ON_ROAD → enter loading → LOADING
  *   LOADING → leave loading      → LOADED (filled) — never empty after a load bay
- *   LOADED → enter factory       → AT_FACTORY
- *   AT_FACTORY → leave factory   → ON_ROAD (empty) + lastFactory location
+ *   LOADED → enter known factory     → AT_FACTORY (named)
+ *   LOADED → stop outside known pins → AT_FACTORY ("Unknown factory")
+ *   AT_FACTORY → leave factory       → ON_ROAD (empty) + lastFactory location
  *   LOADED → re-enter loading    → LOADING (next trip; treated as empty return)
  *
  * All empty travel is ON_ROAD (merged former EMPTY + empty-on-road).
@@ -21,12 +22,40 @@ import {
  * Rule of thumb:
  *   out of loading point → filled (LOADED)
  *   out of factory       → empty (ON_ROAD)
+ *   stop long (≥45m ACC off / ≥2h ACC on), ≥20km from port, off known pins
+ *        → AT_FACTORY / Unknown factory (not short dinner / roadside wait)
  */
 
 /** @deprecated Leave-loading no longer requires dwell; kept for env compatibility. */
 export const MIN_LOADING_DWELL_MS = Number(
   process.env.MIN_LOADING_DWELL_MS || 2 * 60 * 1000,
 );
+
+/** Synthetic factory when a filled truck stops off our known pin list.
+ *  Tuned to avoid dinner / short personal stops / brief breakdowns. */
+export const UNKNOWN_FACTORY_ID = "fac-unknown";
+export const UNKNOWN_FACTORY_NAME = "Unknown factory";
+/** Dwell with engine OFF (typical unload) before Unknown factory. */
+export const UNKNOWN_FACTORY_DWELL_MS = Number(
+  process.env.UNKNOWN_FACTORY_DWELL_MS || 45 * 60 * 1000,
+);
+/** Longer dwell if engine stays ON (idling / dinner / roadside wait). */
+export const UNKNOWN_FACTORY_DWELL_ACC_ON_MS = Number(
+  process.env.UNKNOWN_FACTORY_DWELL_ACC_ON_MS || 2 * 60 * 60 * 1000,
+);
+/** Max speed (km/h) treated as stopped at an unknown site. */
+export const UNKNOWN_FACTORY_MAX_SPEED = Number(
+  process.env.UNKNOWN_FACTORY_MAX_SPEED || 3,
+);
+/** Leave Unknown factory after moving this far from the stop pin. */
+export const UNKNOWN_FACTORY_LEAVE_M = Number(
+  process.env.UNKNOWN_FACTORY_LEAVE_M || 500,
+);
+/** Must be this far from any loading/parking pin (not a port-side break). */
+export const UNKNOWN_FACTORY_MIN_PORT_M = Number(
+  process.env.UNKNOWN_FACTORY_MIN_PORT_M || 20_000,
+);
+
 export type AutoStatus =
   | "PARK"
   | "LOADING"
@@ -47,6 +76,9 @@ export type TruckMemory = {
   lastLoadedFrom?: string | null;
   lastFactory?: string | null;
   lastPark?: string | null;
+  /** Anchor for Unknown-factory stop (leave by distance). */
+  stopLat?: number | null;
+  stopLng?: number | null;
   lastNotifiedStatus?: AutoStatus | null;
   lastNotifiedAt?: number | null;
 };
@@ -121,7 +153,32 @@ export function findNearestFactoryPoint(
 
 export function isKnownFactoryId(id: string | null | undefined): boolean {
   if (!id) return false;
+  if (id === UNKNOWN_FACTORY_ID) return true;
   return FACTORY_POINTS.some((p) => p.id === id);
+}
+
+export function isUnknownFactoryName(name: string | null | undefined): boolean {
+  const v = (name || "").trim().toLowerCase();
+  return v === "unknown factory" || v === "unknown";
+}
+
+function minDistanceToPortSitesM(lat: number, lng: number): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (const p of PORT_LOADING_POINTS) {
+    best = Math.min(best, haversineMeters(lat, lng, p.lat, p.lng));
+  }
+  for (const p of PARKING_POINTS) {
+    best = Math.min(best, haversineMeters(lat, lng, p.lat, p.lng));
+  }
+  return best;
+}
+
+function unknownFactoryDwellNeededMs(accstatus: number | null | undefined): number {
+  // ACC 0 = off (unload-like). ACC 1 = on (idling / dinner / breakdown wait).
+  if (accstatus === 0) return UNKNOWN_FACTORY_DWELL_MS;
+  if (accstatus === 1) return UNKNOWN_FACTORY_DWELL_ACC_ON_MS;
+  // Unknown ACC — between the two (default ~67 min).
+  return Math.round((UNKNOWN_FACTORY_DWELL_MS + UNKNOWN_FACTORY_DWELL_ACC_ON_MS) / 2);
 }
 
 export function normalizeMemory(
@@ -138,6 +195,8 @@ export function normalizeMemory(
       lastLoadedFrom: null,
       lastFactory: null,
       lastPark: null,
+      stopLat: null,
+      stopLng: null,
       lastNotifiedStatus: null,
       lastNotifiedAt: null,
     };
@@ -201,6 +260,14 @@ export function normalizeMemory(
     lastLoadedFrom: (prev.lastLoadedFrom as string | null) ?? null,
     lastFactory: (prev.lastFactory as string | null) ?? null,
     lastPark: (prev.lastPark as string | null) ?? null,
+    stopLat:
+      typeof prev.stopLat === "number" && Number.isFinite(prev.stopLat)
+        ? prev.stopLat
+        : null,
+    stopLng:
+      typeof prev.stopLng === "number" && Number.isFinite(prev.stopLng)
+        ? prev.stopLng
+        : null,
     lastNotifiedStatus: notifiedMap[rawNotified] ?? null,
     lastNotifiedAt: (prev.lastNotifiedAt as number | null) ?? null,
   };
@@ -213,9 +280,28 @@ export function nextStatus(params: {
   insideFactory: { point: FactoryPoint; distanceM: number } | null;
   online: boolean;
   now?: number;
+  /** Current GPS (for Unknown-factory stop / leave). */
+  lat?: number | null;
+  lng?: number | null;
+  /** Speed km/h */
+  speed?: number | null;
+  /** ProTrack ACC: 0 off, 1 on, -1 unknown */
+  accstatus?: number | null;
 }): TruckMemory {
   const now = params.now ?? Date.now();
   const prev = normalizeMemory(params.prev);
+  const speed = Number(params.speed);
+  const lat = Number(params.lat);
+  const lng = Number(params.lng);
+  const hasPos =
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    !(lat === 0 && lng === 0);
+  const nearlyStopped =
+    Number.isFinite(speed) && speed <= UNKNOWN_FACTORY_MAX_SPEED;
+  const farFromPort =
+    hasPos && minDistanceToPortSitesM(lat, lng) >= UNKNOWN_FACTORY_MIN_PORT_M;
+  const dwellNeededMs = unknownFactoryDwellNeededMs(params.accstatus);
 
   const base = {
     lastNotifiedStatus: prev.lastNotifiedStatus ?? null,
@@ -223,6 +309,8 @@ export function nextStatus(params: {
     lastLoadedFrom: prev.lastLoadedFrom ?? null,
     lastFactory: prev.lastFactory ?? null,
     lastPark: prev.lastPark ?? null,
+    stopLat: prev.stopLat ?? null,
+    stopLng: prev.stopLng ?? null,
   };
 
   if (!params.online) {
@@ -292,20 +380,138 @@ export function nextStatus(params: {
         geofenceId: params.insideFactory.point.id,
         geofenceKind: "factory",
         enteredAt:
-          prev.geofenceKind === "factory" && prev.enteredAt
+          prev.geofenceKind === "factory" &&
+          prev.geofenceId === params.insideFactory.point.id &&
+          prev.enteredAt
             ? prev.enteredAt
             : now,
         outsideStreak: 0,
         cargo: "LOADED",
         lastFactory: params.insideFactory.point.name,
+        stopLat: null,
+        stopLng: null,
       };
     }
 
+    const wasUnknownFactory =
+      prev.geofenceId === UNKNOWN_FACTORY_ID ||
+      isUnknownFactoryName(prev.lastFactory);
     const wasAtFactory =
       prev.status === "AT_FACTORY" ||
+      wasUnknownFactory ||
       (prev.geofenceKind === "factory" &&
         prev.geofenceId != null &&
         isKnownFactoryId(prev.geofenceId));
+
+    // Filled + long stop far from port, off known pins → Unknown factory.
+    // Short dinner / tea / brief roadside waits stay LOADED (filled on road).
+    const offKnownSites =
+      !params.insideLoading &&
+      !params.insideParking &&
+      !params.insideFactory;
+    if (
+      offKnownSites &&
+      hasPos &&
+      nearlyStopped &&
+      farFromPort &&
+      (prev.status === "LOADED" ||
+        (prev.status === "AT_FACTORY" && wasUnknownFactory))
+    ) {
+      const stopLat = prev.stopLat ?? lat;
+      const stopLng = prev.stopLng ?? lng;
+      const awayM =
+        prev.stopLat != null && prev.stopLng != null
+          ? haversineMeters(lat, lng, prev.stopLat, prev.stopLng)
+          : 0;
+
+      // Still near the stop pin (or first sample) — count dwell / stay at factory.
+      if (awayM < UNKNOWN_FACTORY_LEAVE_M) {
+        const enteredAt =
+          prev.geofenceId === UNKNOWN_FACTORY_ID && prev.enteredAt
+            ? prev.enteredAt
+            : now;
+        const dwellOk = now - enteredAt >= dwellNeededMs;
+        if (dwellOk || (prev.status === "AT_FACTORY" && wasUnknownFactory)) {
+          return {
+            ...base,
+            status: "AT_FACTORY",
+            geofenceId: UNKNOWN_FACTORY_ID,
+            geofenceKind: "factory",
+            enteredAt,
+            outsideStreak: 0,
+            cargo: "LOADED",
+            lastFactory: UNKNOWN_FACTORY_NAME,
+            stopLat,
+            stopLng,
+          };
+        }
+        // Timing a long stop — keep showing filled on road until dwell passes.
+        return {
+          ...base,
+          status: "LOADED",
+          geofenceId: UNKNOWN_FACTORY_ID,
+          geofenceKind: "factory",
+          enteredAt,
+          outsideStreak: 0,
+          cargo: "LOADED",
+          stopLat,
+          stopLng,
+        };
+      }
+    }
+
+    // Moving again before dwell finished → cancel unknown-factory timer.
+    if (
+      prev.geofenceId === UNKNOWN_FACTORY_ID &&
+      prev.status === "LOADED" &&
+      (!nearlyStopped || !farFromPort)
+    ) {
+      return {
+        ...base,
+        status: "LOADED",
+        geofenceId: null,
+        geofenceKind: null,
+        enteredAt: null,
+        outsideStreak: 0,
+        cargo: "LOADED",
+        stopLat: null,
+        stopLng: null,
+      };
+    }
+
+    // Leave Unknown factory by distance or movement.
+    if (wasAtFactory && wasUnknownFactory && hasPos) {
+      const awayM =
+        prev.stopLat != null && prev.stopLng != null
+          ? haversineMeters(lat, lng, prev.stopLat, prev.stopLng)
+          : Number.POSITIVE_INFINITY;
+      const leftByDistance = awayM >= UNKNOWN_FACTORY_LEAVE_M;
+      const leftBySpeed = Number.isFinite(speed) && speed > UNKNOWN_FACTORY_MAX_SPEED * 2;
+      const streak = leftByDistance || leftBySpeed ? prev.outsideStreak + 1 : 0;
+      if (streak >= 2) {
+        return {
+          ...base,
+          status: "ON_ROAD",
+          geofenceId: null,
+          geofenceKind: null,
+          enteredAt: null,
+          outsideStreak: 0,
+          cargo: "EMPTY",
+          lastFactory: prev.lastFactory ?? UNKNOWN_FACTORY_NAME,
+          stopLat: null,
+          stopLng: null,
+        };
+      }
+      return {
+        ...prev,
+        ...base,
+        status: "AT_FACTORY",
+        cargo: "LOADED",
+        lastFactory: prev.lastFactory ?? UNKNOWN_FACTORY_NAME,
+        outsideStreak: streak,
+      };
+    }
+
     const outsideFactoryStreak = wasAtFactory ? prev.outsideStreak + 1 : 0;
 
     if (wasAtFactory && outsideFactoryStreak >= 2) {
@@ -318,6 +524,8 @@ export function nextStatus(params: {
         outsideStreak: 0,
         cargo: "EMPTY",
         lastFactory: prev.lastFactory ?? null,
+        stopLat: null,
+        stopLng: null,
       };
     }
 
@@ -332,6 +540,7 @@ export function nextStatus(params: {
     }
 
     // Filled (on road or in port parking after a real load).
+    // Clear unknown-stop timer if moving again.
     return {
       ...base,
       status: "LOADED",
@@ -340,6 +549,8 @@ export function nextStatus(params: {
       enteredAt: null,
       outsideStreak: 0,
       cargo: "LOADED",
+      stopLat: null,
+      stopLng: null,
     };
   }
 

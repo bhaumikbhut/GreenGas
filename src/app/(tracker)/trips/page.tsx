@@ -94,9 +94,26 @@ export default function TripsPage() {
   }, [plate, port, factory, status]);
 
   useEffect(() => {
+    setLoading(true);
     void load();
     const id = setInterval(() => void load(), 60000);
     return () => clearInterval(id);
+  }, [load]);
+
+  // Background reconcile after first paint; refresh table once done.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        await fetch("/api/trips?seed=1&limit=1", { cache: "no-store" });
+        if (!cancelled) void load();
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [load]);
 
   const trips = useMemo(() => {
