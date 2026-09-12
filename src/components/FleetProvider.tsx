@@ -99,6 +99,15 @@ export const STATUS_META: Record<
     title: "text-black",
     muted: "text-black/80",
   },
+  ON_ROAD: {
+    label: "Road",
+    chip: "bg-black/15 text-black",
+    tile: "bg-[#fde68a] text-black",
+    bar: "bg-black/40",
+    card: "border-[#eab308] bg-[#fde68a]",
+    title: "text-black",
+    muted: "text-black/80",
+  },
   OFFLINE: {
     label: "Offline",
     chip: "bg-black/15 text-black",
@@ -125,6 +134,11 @@ export function secondaryLine(t: TruckSnapshot): string | null {
   }
   if (t.status === "EMPTY" && t.lastFactory) {
     return `Left ${t.lastFactory}`;
+  }
+  if (t.status === "ON_ROAD" && (t.lastPark || t.lastFactory)) {
+    return t.lastFactory
+      ? `Left ${t.lastFactory}`
+      : `Left ${t.lastPark}`;
   }
   if (!t.online) return "GPS offline";
   return null;
@@ -285,6 +299,7 @@ export function FleetProvider({ children }: { children: ReactNode }) {
         LOADED: data.statusCounts.LOADED ?? 0,
         AT_FACTORY: data.statusCounts.AT_FACTORY ?? 0,
         EMPTY: data.statusCounts.EMPTY ?? 0,
+        ON_ROAD: data.statusCounts.ON_ROAD ?? 0,
         OFFLINE: data.statusCounts.OFFLINE ?? 0,
       };
     }
@@ -294,11 +309,12 @@ export function FleetProvider({ children }: { children: ReactNode }) {
       LOADED: 0,
       AT_FACTORY: 0,
       EMPTY: 0,
+      ON_ROAD: 0,
       OFFLINE: 0,
     };
     for (const t of trucks) {
       if (c[t.status] != null) c[t.status] += 1;
-      else c.EMPTY += 1;
+      else c.ON_ROAD += 1;
     }
     return c;
   }, [trucks, data?.statusCounts]);

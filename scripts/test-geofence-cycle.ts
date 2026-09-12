@@ -4,6 +4,7 @@ import {
   type TruckMemory,
 } from "../src/lib/geofence";
 import type { LoadingPoint } from "../src/lib/loading-points";
+import type { FactoryPoint } from "../src/lib/factory-points";
 
 const loadPt: LoadingPoint = {
   id: "mundra-loading",
@@ -23,9 +24,17 @@ const parkPt: LoadingPoint = {
   radiusM: 500,
   kind: "parking",
 };
+const factoryPt: FactoryPoint = {
+  id: "fac-test",
+  name: "TEST FACTORY",
+  lat: 1,
+  lng: 1,
+  radiusM: 100,
+};
 
 const insideL = { point: loadPt, distanceM: 10 };
 const insideP = { point: parkPt, distanceM: 20 };
+const insideF = { point: factoryPt, distanceM: 15 };
 const none = null;
 
 let fails = 0;
@@ -48,7 +57,7 @@ let m = nextStatus({
   online: true,
   now: t0,
 });
-assert(m.status === "PARK" && m.cargo === "EMPTY", "EMPTY→PARK");
+assert(m.status === "PARK" && m.cargo === "EMPTY", "ON_ROAD→PARK");
 
 m = nextStatus({
   prev: m,
@@ -60,7 +69,7 @@ m = nextStatus({
 });
 assert(m.status === "LOADING", "PARK→LOADING");
 
-// Leave too soon (no dwell) → not LOADED
+// Leave too soon (no dwell) → not LOADED, not EMPTY
 let early: TruckMemory = { ...m, enteredAt: t0 + 1000 };
 early = nextStatus({
   prev: early,
@@ -79,8 +88,8 @@ early = nextStatus({
   now: t0 + 1000 + 60_000,
 });
 assert(
-  early.status === "EMPTY" && early.cargo === "EMPTY",
-  "short visit → EMPTY not LOADED",
+  early.status === "ON_ROAD" && early.cargo === "EMPTY",
+  "short visit → ON_ROAD not EMPTY/LOADED",
 );
 
 // Full dwell then leave → LOADED
@@ -124,6 +133,65 @@ assert(
   "dwell+leave → LOADED",
 );
 
+// LOADED on road must stay LOADED (not EMPTY)
+m = nextStatus({
+  prev: m,
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: none,
+  online: true,
+  now: afterDwell + 5000,
+});
+assert(m.status === "LOADED", "LOADED stays LOADED on road");
+
+// LOADED → AT_FACTORY
+m = nextStatus({
+  prev: m,
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: insideF,
+  online: true,
+  now: afterDwell + 6000,
+});
+assert(
+  m.status === "AT_FACTORY" && m.cargo === "LOADED" && m.lastFactory === factoryPt.name,
+  "LOADED→AT_FACTORY",
+);
+
+// Leave factory (2 polls) → EMPTY only
+m = nextStatus({
+  prev: m,
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: none,
+  online: true,
+  now: afterDwell + 7000,
+});
+assert(m.status === "AT_FACTORY", "factory leave poll 1 still AT_FACTORY");
+m = nextStatus({
+  prev: m,
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: none,
+  online: true,
+  now: afterDwell + 8000,
+});
+assert(
+  m.status === "EMPTY" && m.cargo === "EMPTY" && m.lastFactory === factoryPt.name,
+  "AT_FACTORY leave → EMPTY",
+);
+
+// EMPTY stays EMPTY until park/load (not flipped away randomly)
+m = nextStatus({
+  prev: m,
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: none,
+  online: true,
+  now: afterDwell + 9000,
+});
+assert(m.status === "EMPTY", "EMPTY persists on road after factory");
+
 const bad = nextStatus({
   prev: {
     status: "LOADED",
@@ -159,6 +227,34 @@ const filled = nextStatus({
   now: afterDwell + 3000,
 });
 assert(filled.status === "LOADED", "real LOADED at parking stays LOADED");
+
+// Leave park → ON_ROAD (not EMPTY)
+let parkLeave: TruckMemory = {
+  status: "PARK",
+  geofenceId: parkPt.id,
+  geofenceKind: "parking",
+  enteredAt: t0,
+  outsideStreak: 0,
+  cargo: "EMPTY",
+  lastPark: parkPt.name,
+};
+parkLeave = nextStatus({
+  prev: parkLeave,
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: none,
+  online: true,
+  now: t0 + 1000,
+});
+parkLeave = nextStatus({
+  prev: parkLeave,
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: none,
+  online: true,
+  now: t0 + 2000,
+});
+assert(parkLeave.status === "ON_ROAD", "leave park → ON_ROAD not EMPTY");
 
 let orphan: TruckMemory = {
   status: "LOADING",

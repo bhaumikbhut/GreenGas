@@ -7,16 +7,19 @@ import {
 
 /**
  * Trip cycle (GPS only, per-site radius):
- *   EMPTY → enter parking      → PARK
- *   PARK  → leave parking      → EMPTY
- *   EMPTY/PARK → enter loading → LOADING
- *   LOADING → leave loading    → LOADED  (filled) only after min dwell
- *   LOADED → enter factory     → AT_FACTORY
- *   AT_FACTORY → leave factory → EMPTY
- *   LOADED → re-enter loading  → LOADING (next trip; treated as empty return)
+ *   ON_ROAD/EMPTY → enter parking → PARK
+ *   PARK → leave parking         → ON_ROAD
+ *   PARK/ON_ROAD → enter loading → LOADING
+ *   LOADING → leave loading      → LOADED (filled) only after min dwell
+ *   LOADED → enter factory       → AT_FACTORY
+ *   AT_FACTORY → leave factory   → EMPTY   ← only path into EMPTY
+ *   LOADED → re-enter loading    → LOADING (next trip; treated as empty return)
+ *
+ * EMPTY is only set after leaving a factory. Port / LOADING / LOADED trucks
+ * never appear in EMPTY. Other empty travel uses ON_ROAD.
  *
  * Short visits to a loading pin (drive-through) do NOT become LOADED —
- * they fall back to PARK (if in parking) or EMPTY.
+ * they fall back to PARK (if in parking) or ON_ROAD.
  * Loading points take priority over parking when both apply.
  */
 
@@ -30,6 +33,7 @@ export type AutoStatus =
   | "LOADED"
   | "AT_FACTORY"
   | "EMPTY"
+  | "ON_ROAD"
   | "OFFLINE";
 
 export type TruckMemory = {
@@ -125,7 +129,7 @@ export function normalizeMemory(
 ): TruckMemory {
   if (!prev) {
     return {
-      status: "EMPTY",
+      status: "ON_ROAD",
       geofenceId: null,
       geofenceKind: null,
       enteredAt: null,
@@ -139,7 +143,7 @@ export function normalizeMemory(
     };
   }
 
-  const raw = String(prev.status ?? "EMPTY");
+  const raw = String(prev.status ?? "ON_ROAD");
   let status: AutoStatus;
   let cargo: "LOADED" | "EMPTY" =
     prev.cargo === "LOADED" || prev.cargo === "EMPTY"
@@ -157,11 +161,16 @@ export function normalizeMemory(
   } else if (raw === "LOADED" || raw === "RELEASED") {
     status = "LOADED";
     cargo = "LOADED";
-  } else if (raw === "EMPTY" || raw === "ON_ROAD") {
-    status = "EMPTY";
+  } else if (raw === "EMPTY") {
+    // EMPTY is post-factory only. Legacy EMPTY without a factory visit → ON_ROAD.
+    status = prev.lastFactory ? "EMPTY" : "ON_ROAD";
+    cargo = "EMPTY";
+  } else if (raw === "ON_ROAD") {
+    status = "ON_ROAD";
     cargo = "EMPTY";
   } else {
-    status = "EMPTY";
+    status = "ON_ROAD";
+    cargo = "EMPTY";
   }
 
   const rawNotified = String(prev.lastNotifiedStatus ?? "");
@@ -174,7 +183,7 @@ export function normalizeMemory(
     AT_FACTORY: "AT_FACTORY",
     ARRIVED: "AT_FACTORY",
     EMPTY: "EMPTY",
-    ON_ROAD: "EMPTY",
+    ON_ROAD: "ON_ROAD",
     OFFLINE: "OFFLINE",
   };
 
@@ -273,7 +282,8 @@ export function nextStatus(params: {
       };
     }
 
-    // Heal false LOADED on the road with no load source → EMPTY.
+    // Heal false LOADED on the road with no load source → ON_ROAD (not EMPTY).
+    // EMPTY is reserved for leave-factory only; never dump LOADED into EMPTY.
     if (
       !prev.lastLoadedFrom &&
       prev.status === "LOADED" &&
@@ -283,7 +293,7 @@ export function nextStatus(params: {
     ) {
       return {
         ...base,
-        status: "EMPTY",
+        status: "ON_ROAD",
         geofenceId: null,
         geofenceKind: null,
         enteredAt: null,
@@ -435,7 +445,7 @@ export function nextStatus(params: {
 
     return {
       ...base,
-      status: "EMPTY",
+      status: "ON_ROAD",
       geofenceId: null,
       geofenceKind: null,
       enteredAt: null,
@@ -478,7 +488,7 @@ export function nextStatus(params: {
   if (wasPark && leaveParkStreak >= 2) {
     return {
       ...base,
-      status: "EMPTY",
+      status: "ON_ROAD",
       geofenceId: null,
       geofenceKind: null,
       enteredAt: null,
@@ -498,9 +508,23 @@ export function nextStatus(params: {
     };
   }
 
+  // Still post-factory empty until next park/load.
+  if (prev.status === "EMPTY" && prev.lastFactory) {
+    return {
+      ...base,
+      status: "EMPTY",
+      geofenceId: null,
+      geofenceKind: null,
+      enteredAt: null,
+      outsideStreak: 0,
+      cargo: "EMPTY",
+      lastFactory: prev.lastFactory,
+    };
+  }
+
   return {
     ...base,
-    status: "EMPTY",
+    status: "ON_ROAD",
     geofenceId: null,
     geofenceKind: null,
     enteredAt: null,

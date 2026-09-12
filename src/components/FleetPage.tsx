@@ -39,7 +39,7 @@ export default function FleetPage() {
       {/* Compact toolbar — keeps TV / large screens list-first */}
       <div className="shrink-0 border-b border-[var(--gg-line)] bg-[var(--gg-surface)] px-3 py-2 lg:px-4">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
-          <div className="grid min-w-0 flex-1 grid-cols-6 gap-1">
+          <div className="grid min-w-0 flex-1 grid-cols-4 gap-1 sm:grid-cols-7">
             {(
               [
                 ["PARK", counts.PARK],
@@ -47,6 +47,7 @@ export default function FleetPage() {
                 ["LOADED", counts.LOADED],
                 ["AT_FACTORY", counts.AT_FACTORY],
                 ["EMPTY", counts.EMPTY],
+                ["ON_ROAD", counts.ON_ROAD],
                 ["OFFLINE", counts.OFFLINE],
               ] as const
             ).map(([key, value]) => {
@@ -160,7 +161,7 @@ export default function FleetPage() {
         ) : (
           <ul className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
             {filtered.map((t) => {
-              const meta = STATUS_META[t.status] ?? STATUS_META.EMPTY;
+              const meta = STATUS_META[t.status] ?? STATUS_META.ON_ROAD;
               const on = t.imei === selectedImei;
               const detail = secondaryLine(t);
               return (

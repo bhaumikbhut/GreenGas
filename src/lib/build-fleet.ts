@@ -111,6 +111,7 @@ export async function buildFleetSnapshot(): Promise<FleetSnapshot> {
         LOADED: 0,
         AT_FACTORY: 0,
         EMPTY: 0,
+        ON_ROAD: 0,
         OFFLINE: 0,
       },
       statusCountTotal: 0,
@@ -214,7 +215,9 @@ export async function buildFleetSnapshot(): Promise<FleetSnapshot> {
         (memory.status === "LOADED"
           ? memory.lastLoadedFrom || "Port (departed)"
           : memory.status === "EMPTY"
-            ? memory.lastFactory || memory.lastPark || "Departed"
+            ? memory.lastFactory || "Factory (departed)"
+            : memory.status === "ON_ROAD"
+              ? memory.lastPark || memory.lastFactory || "On road"
             : memory.status === "PARK"
               ? memory.lastPark || "Parking"
               : "Unknown");
@@ -310,6 +313,7 @@ export async function buildFleetSnapshot(): Promise<FleetSnapshot> {
     LOADED: 0,
     AT_FACTORY: 0,
     EMPTY: 0,
+    ON_ROAD: 0,
     OFFLINE: 0,
   };
   for (const t of trucks) {
@@ -336,6 +340,7 @@ export async function buildFleetSnapshot(): Promise<FleetSnapshot> {
       statusCounts.LOADED +
       statusCounts.AT_FACTORY +
       statusCounts.EMPTY +
+      statusCounts.ON_ROAD +
       statusCounts.OFFLINE,
     whatsappConfigured: whatsappConfigured(),
     factoryCount: FACTORY_POINTS.length,

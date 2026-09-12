@@ -19,17 +19,18 @@ Live truck map + auto status from ProTrack (portal bridge) + WhatsApp alerts via
 ## Status rules (no driver input)
 
 ```text
-EMPTY/PARK → enter parking (site radius)  → PARK
-PARK       → leave parking                → EMPTY
-EMPTY/PARK → enter loading (site radius)  → LOADING
-LOADING    → leave loading                → LOADED   (filled → factory)
-LOADED     → enter factory                → AT_FACTORY
-AT_FACTORY → leave factory                → EMPTY
+ON_ROAD/EMPTY → enter parking → PARK
+PARK          → leave parking → ON_ROAD
+PARK/ON_ROAD  → enter loading → LOADING
+LOADING       → leave loading → LOADED     (filled, after min dwell)
+LOADED        → enter factory → AT_FACTORY
+AT_FACTORY    → leave factory → EMPTY      (only path into EMPTY)
 ```
 
 - Each loading/parking pin has its **own radius** (Neel field pins, Sep 2026)  
 - Loading bay wins over parking if both apply  
-- On road: **LOADED** (filled) or **EMPTY** / **PARK** at yards  
+- **EMPTY** only after leaving a factory — port / LOADING / LOADED never count as EMPTY  
+- On road empty (not post-factory): **ON_ROAD**  
 - WhatsApp on transitions + live track link (`/track/<imei>`)  
 - Factory yards: Google Maps pins in `src/lib/factory-points.ts` (per-plant radius from nearest neighbor)  
 - Set `APP_PUBLIC_URL` for WhatsApp live-track links  

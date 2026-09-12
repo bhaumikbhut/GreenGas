@@ -30,6 +30,7 @@ function statusColor(status: string): string {
   if (status === "LOADED") return "#00B386"; // Groww-style market green
   if (status === "AT_FACTORY") return "#2dd4bf"; // teal
   if (status === "EMPTY") return "#eab308"; // yellow
+  if (status === "ON_ROAD") return "#fde68a"; // light amber
   if (status === "OFFLINE") return "#9ca3af"; // gray
   return "#1d4f91";
 }
