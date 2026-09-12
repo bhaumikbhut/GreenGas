@@ -27,6 +27,11 @@ import {
   writeTruckStore,
 } from "@/lib/status-store";
 import { sendWhatsAppAlert, whatsappConfigured } from "@/lib/whatsapp";
+import {
+  completeTrip,
+  markTripArrived,
+  openTrip,
+} from "@/lib/trips";
 
 const ALERT_STATUSES = new Set<AutoStatus>([
   "PARK",
@@ -339,6 +344,40 @@ export async function buildFleetSnapshot(
       prevNorm?.status === "AT_FACTORY" &&
       memory.status === "ON_ROAD" &&
       Boolean(memory.lastFactory);
+
+    const becameLoaded =
+      memory.status === "LOADED" && prevNorm?.status !== "LOADED";
+    const becameAtFactory =
+      memory.status === "AT_FACTORY" && prevNorm?.status !== "AT_FACTORY";
+
+    // Trip history (always — even on live skipAlerts refreshes).
+    if (becameLoaded) {
+      await openTrip({
+        imei: device.imei,
+        plate: device.plate,
+        productLine: device.accountLabel,
+        port:
+          insideLoading?.point.port ??
+          insideParking?.point.port ??
+          null,
+        loadedFrom:
+          memory.lastLoadedFrom ||
+          insideLoading?.point.name ||
+          "Unknown loading point",
+      });
+    }
+    if (becameAtFactory && memory.lastFactory) {
+      await markTripArrived({
+        imei: device.imei,
+        factory: memory.lastFactory,
+      });
+    }
+    if (leftFactory) {
+      await completeTrip({
+        imei: device.imei,
+        factory: memory.lastFactory,
+      });
+    }
 
     const prevNotified = String(prev?.lastNotifiedStatus ?? "");
     const shouldAlert =

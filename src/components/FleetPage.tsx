@@ -40,7 +40,7 @@ export default function FleetPage() {
       {/* Compact toolbar — keeps TV / large screens list-first */}
       <div className="shrink-0 border-b border-[var(--gg-line)] bg-[var(--gg-surface)] px-3 py-2 lg:px-4">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
-          <div className="grid min-w-0 flex-1 grid-cols-4 gap-1 sm:grid-cols-7">
+          <div className="grid min-w-0 flex-1 grid-cols-3 gap-1 sm:grid-cols-6">
             {(
               [
                 ["PARK", counts.PARK],

@@ -10,11 +10,28 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const { trucks, filtered, updatedLabel, data, productFilter, statusFilter } =
     useFleet();
   const onMap = pathname === "/map";
+  const onTrips = pathname === "/trips";
   const onFleet = pathname === "/" || pathname === "";
   const productScoped =
     productFilter === "ALL"
       ? trucks.length
       : trucks.filter((t) => t.productLine === productFilter).length;
+
+  const navLink = (
+    href: string,
+    active: boolean,
+    label: string,
+    className = "",
+  ) => (
+    <Link
+      href={href}
+      className={`min-h-9 rounded-lg px-3 text-sm font-medium leading-9 transition lg:px-4 ${
+        active ? "bg-white text-[var(--gg-forest)]" : "text-[#c5ddd0]"
+      } ${className}`}
+    >
+      {label}
+    </Link>
+  );
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[var(--gg-bg)] text-[var(--gg-ink)]">
@@ -56,22 +73,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <nav className="hidden shrink-0 gap-1 rounded-xl bg-white/10 p-1 md:flex">
-            <Link
-              href="/"
-              className={`min-h-9 rounded-lg px-4 text-sm font-medium leading-9 transition ${
-                onFleet ? "bg-white text-[var(--gg-forest)]" : "text-[#c5ddd0]"
-              }`}
-            >
-              Fleet
-            </Link>
-            <Link
-              href="/map"
-              className={`min-h-9 rounded-lg px-4 text-sm font-medium leading-9 transition ${
-                onMap ? "bg-white text-[var(--gg-forest)]" : "text-[#c5ddd0]"
-              }`}
-            >
-              Map
-            </Link>
+            {navLink("/", onFleet, "Fleet")}
+            {navLink("/map", onMap, "Map")}
+            {navLink("/trips", onTrips, "Trips")}
           </nav>
         </div>
       </header>
@@ -84,7 +88,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       <main className="relative min-h-0 flex-1 overflow-hidden">{children}</main>
 
-      <nav className="safe-pad-x safe-pad-bottom grid shrink-0 grid-cols-2 gap-1 border-t border-[var(--gg-line)] bg-white px-2 pt-1.5 md:hidden">
+      <nav className="safe-pad-x safe-pad-bottom grid shrink-0 grid-cols-3 gap-1 border-t border-[var(--gg-line)] bg-white px-2 pt-1.5 md:hidden">
         <Link
           href="/"
           className={`min-h-12 rounded-xl text-center text-sm font-medium transition ${
@@ -109,6 +113,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <span className="block pt-1.5">Map</span>
           <span className="block text-[10px] font-normal opacity-70">
             Live GPS
+          </span>
+        </Link>
+        <Link
+          href="/trips"
+          className={`min-h-12 rounded-xl text-center text-sm font-medium transition ${
+            onTrips
+              ? "bg-[#e8f3ec] text-[var(--gg-forest)]"
+              : "text-[var(--gg-muted)]"
+          }`}
+        >
+          <span className="block pt-1.5">Trips</span>
+          <span className="block text-[10px] font-normal opacity-70">
+            Port → factory
           </span>
         </Link>
       </nav>
