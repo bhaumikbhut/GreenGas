@@ -169,9 +169,11 @@ export default function FleetPage() {
                     type="button"
                     onClick={() => openOnMap(t.imei)}
                     className={`flex h-full w-full items-stretch gap-2 rounded-xl border px-2.5 py-2 text-left transition active:scale-[0.99] ${
+                      meta.card
+                    } ${
                       on
-                        ? "border-[var(--gg-green)] bg-[#e8f3ec]"
-                        : "border-[var(--gg-line)] bg-white hover:border-[#b7cfc0]"
+                        ? "ring-2 ring-[var(--gg-forest)] ring-offset-1"
+                        : ""
                     }`}
                   >
                     <span

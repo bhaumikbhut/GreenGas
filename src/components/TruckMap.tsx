@@ -2,10 +2,12 @@
 
 import { MapContainer, TileLayer, Circle, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TruckSnapshot } from "@/app/api/trucks/route";
 import type { FactoryPoint } from "@/lib/factory-points";
 import type { LoadingPoint } from "@/lib/loading-points";
+
+type Basemap = "street" | "satellite";
 
 type Props = {
   trucks: TruckSnapshot[];
@@ -17,16 +19,19 @@ type Props = {
   focusToken?: number;
   /** fleet = pin icons; live = rotating top-down vehicle (Uber-style tracking). */
   mode?: "fleet" | "live";
+  /** Initial basemap; user can still toggle on the map. */
+  defaultBasemap?: Basemap;
   onSelectImei?: (imei: string) => void;
 };
 
 function statusColor(status: string): string {
-  if (status === "PARK") return "#a16207";
-  if (status === "LOADING") return "#c45c26";
-  if (status === "LOADED") return "#1f7a4d";
-  if (status === "AT_FACTORY") return "#0f766e";
+  if (status === "PARK") return "#2563eb"; // blue
+  if (status === "LOADING") return "#ea580c"; // orange
+  if (status === "LOADED") return "#16a34a"; // green
+  if (status === "AT_FACTORY") return "#0d9488"; // teal
+  if (status === "EMPTY") return "#eab308"; // yellow
   if (status === "OFFLINE") return "#6b7280";
-  return "#1d4f91"; // EMPTY
+  return "#1d4f91";
 }
 
 /** Fleet overview: status pin + clear truck glyph (OSM/Temaki style). */
@@ -253,33 +258,79 @@ export default function TruckMap({
   selectedImei,
   focusToken = 0,
   mode = "fleet",
+  defaultBasemap = "satellite",
   onSelectImei,
 }: Props) {
+  const [basemap, setBasemap] = useState<Basemap>(defaultBasemap);
+
   return (
-    <MapContainer
-      center={[22.0, 71.0]}
-      zoom={7}
-      className="h-full w-full"
-      scrollWheelZoom
-    >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-      <InvalidateOnResize />
-      <FitBounds
-        trucks={trucks}
-        loadingPoints={loadingPoints}
-        factoryPoints={factoryPoints}
-        selectedImei={selectedImei}
-      />
-      <FocusTruck
-        trucks={trucks}
-        selectedImei={selectedImei}
-        focusToken={focusToken}
-        mode={mode}
-      />
-      {loadingPoints.map((p) => {
+    <div className="relative h-full w-full">
+      <div className="pointer-events-auto absolute right-3 top-3 z-[1000] flex overflow-hidden rounded-lg bg-white/95 shadow-md ring-1 ring-black/10 backdrop-blur">
+        <button
+          type="button"
+          onClick={() => setBasemap("street")}
+          className={
+            "px-3 py-1.5 text-xs font-medium transition " +
+            (basemap === "street"
+              ? "bg-[var(--gg-green)] text-white"
+              : "text-[var(--gg-ink)] hover:bg-[#eef3ee]")
+          }
+        >
+          Map
+        </button>
+        <button
+          type="button"
+          onClick={() => setBasemap("satellite")}
+          className={
+            "px-3 py-1.5 text-xs font-medium transition " +
+            (basemap === "satellite"
+              ? "bg-[var(--gg-green)] text-white"
+              : "text-[var(--gg-ink)] hover:bg-[#eef3ee]")
+          }
+        >
+          Satellite
+        </button>
+      </div>
+      <MapContainer
+        center={[22.0, 71.0]}
+        zoom={7}
+        className="h-full w-full"
+        scrollWheelZoom
+      >
+        {basemap === "satellite" ? (
+          <>
+            <TileLayer
+              attribution='Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics'
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={19}
+            />
+            <TileLayer
+              attribution=""
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+              maxZoom={19}
+              opacity={0.85}
+            />
+          </>
+        ) : (
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+        )}
+        <InvalidateOnResize />
+        <FitBounds
+          trucks={trucks}
+          loadingPoints={loadingPoints}
+          factoryPoints={factoryPoints}
+          selectedImei={selectedImei}
+        />
+        <FocusTruck
+          trucks={trucks}
+          selectedImei={selectedImei}
+          focusToken={focusToken}
+          mode={mode}
+        />
+        {loadingPoints.map((p) => {
         const isParking = p.kind === "parking";
         const color = isParking ? "#a16207" : "#1f7a4d";
         const r = p.radiusM > 0 ? p.radiusM : radiusM;
@@ -399,5 +450,6 @@ export default function TruckMap({
         ) : null,
       )}
     </MapContainer>
+    </div>
   );
 }

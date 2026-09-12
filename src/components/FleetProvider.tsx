@@ -40,37 +40,43 @@ export type FleetApiResponse = {
 
 export const STATUS_META: Record<
   string,
-  { label: string; chip: string; bar: string }
+  { label: string; chip: string; bar: string; card: string }
 > = {
   PARK: {
     label: "Park",
-    chip: "bg-[#fef3c7] text-[#92400e]",
-    bar: "bg-[#a16207]",
+    chip: "bg-[#dbeafe] text-[#1e40af]",
+    bar: "bg-[#2563eb]",
+    card: "border-[#93c5fd] bg-[#eff6ff]",
   },
   LOADING: {
     label: "Loading",
-    chip: "bg-[#f6e8df] text-[#8a3b12]",
-    bar: "bg-[#c45c26]",
+    chip: "bg-[#ffedd5] text-[#c2410c]",
+    bar: "bg-[#ea580c]",
+    card: "border-[#fdba74] bg-[#fff7ed]",
   },
   LOADED: {
     label: "Loaded",
-    chip: "bg-[#dff3e8] text-[#145c38]",
-    bar: "bg-[#1f7a4d]",
+    chip: "bg-[#dcfce7] text-[#166534]",
+    bar: "bg-[#16a34a]",
+    card: "border-[#86efac] bg-[#f0fdf4]",
   },
   AT_FACTORY: {
     label: "Factory",
-    chip: "bg-[#d8f3f0] text-[#0f766e]",
-    bar: "bg-[#0f766e]",
+    chip: "bg-[#ccfbf1] text-[#0f766e]",
+    bar: "bg-[#0d9488]",
+    card: "border-[#5eead4] bg-[#f0fdfa]",
   },
   EMPTY: {
     label: "Empty",
-    chip: "bg-[#e4eef8] text-[#1d4f91]",
-    bar: "bg-[#1d4f91]",
+    chip: "bg-[#fef9c3] text-[#a16207]",
+    bar: "bg-[#eab308]",
+    card: "border-[#fde047] bg-[#fefce8]",
   },
   OFFLINE: {
     label: "Offline",
     chip: "bg-[#eef0f2] text-[#4b5563]",
     bar: "bg-[#6b7280]",
+    card: "border-[#d1d5db] bg-[#f9fafb]",
   },
 };
 
