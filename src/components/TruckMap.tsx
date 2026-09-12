@@ -42,15 +42,23 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function plateLabelHtml(plate: string, color: string): string {
+function plateTextColor(status: string): string {
+  // Yellow / orange need dark text; everything else uses white.
+  if (status === "EMPTY" || status === "PARK") return "#1c1917";
+  return "#ffffff";
+}
+
+function plateLabelHtml(plate: string, status: string): string {
   const text = escapeHtml(plate || "—");
+  const bg = statusColor(status);
+  const fg = plateTextColor(status);
   return (
     `<div class="gg-plate-label" style="` +
-    `margin-top:2px;max-width:110px;padding:2px 5px;border-radius:4px;` +
-    `background:rgba(15,15,15,.82);color:#fff;border:1px solid ${color};` +
-    `font:700 10px/1.2 ui-sans-serif,system-ui,sans-serif;` +
+    `margin-top:3px;max-width:120px;padding:3px 6px;border-radius:4px;` +
+    `background:${bg};color:${fg};border:1px solid #fff;` +
+    `font:700 11px/1.2 ui-sans-serif,system-ui,sans-serif;` +
     `letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;` +
-    `text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.35)` +
+    `text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.4)` +
     `">${text}</div>`
   );
 }
@@ -64,29 +72,32 @@ function truckMarkerIcon(
   _speed = 0,
 ) {
   const color = statusColor(status);
-  const dot = selected ? 16 : 12;
-  const boxW = 100;
-  const boxH = dot + 22;
+  const size = selected ? 34 : 28;
+  const r = selected ? 11 : 9;
+  const boxW = 108;
+  const boxH = size + 24;
+  const cx = 16;
+  const cy = 16;
   const ring = selected
-    ? `<circle cx="12" cy="12" r="10" fill="none" stroke="${color}" stroke-width="2" opacity=".4"/>`
+    ? `<circle cx="${cx}" cy="${cy}" r="14" fill="none" stroke="${color}" stroke-width="2.5" opacity=".45"/>`
     : "";
 
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${dot + 4}" height="${dot + 4}" viewBox="0 0 24 24" overflow="visible">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 32 32" overflow="visible">` +
     ring +
-    `<circle cx="12" cy="12" r="${selected ? 7 : 6}" fill="${color}" stroke="#fff" stroke-width="2"/>` +
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" stroke="#fff" stroke-width="3"/>` +
     `</svg>`;
 
   return L.divIcon({
     className: "gg-truck-marker",
     html:
-      `<div class="gg-truck-pin" style="width:${boxW}px;display:flex;flex-direction:column;align-items:center;line-height:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))">` +
+      `<div class="gg-truck-pin" style="width:${boxW}px;display:flex;flex-direction:column;align-items:center;line-height:0;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))">` +
       svg +
-      plateLabelHtml(plate, color) +
+      plateLabelHtml(plate, status) +
       `</div>`,
     iconSize: [boxW, boxH],
-    iconAnchor: [boxW / 2, (dot + 4) / 2],
-    popupAnchor: [0, -((dot + 4) / 2)],
+    iconAnchor: [boxW / 2, size / 2],
+    popupAnchor: [0, -(size / 2)],
   });
 }
 

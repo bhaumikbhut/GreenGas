@@ -182,20 +182,26 @@ export default function FleetPage() {
                     />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center justify-between gap-1.5">
-                        <span className="truncate text-sm font-semibold tracking-wide">
+                        <span
+                          className={`truncate text-sm font-bold tracking-wide ${meta.title}`}
+                        >
                           {t.plate}
                         </span>
                         <span
-                          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${meta.chip}`}
+                          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ${meta.chip}`}
                         >
                           {statusBadge(t.status)}
                         </span>
                       </span>
-                      <span className={`mt-0.5 block truncate text-[11px] ${meta.muted}`}>
+                      <span
+                        className={`mt-0.5 block truncate text-[11px] font-medium ${meta.muted}`}
+                      >
                         {t.productLine} · {t.speed} km/h
                       </span>
                       {detail ? (
-                        <span className={`mt-0.5 block truncate text-[11px] ${meta.muted}`}>
+                        <span
+                          className={`mt-0.5 block truncate text-[11px] font-medium ${meta.muted}`}
+                        >
                           {detail}
                         </span>
                       ) : null}
