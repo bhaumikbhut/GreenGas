@@ -31,7 +31,7 @@ AT_FACTORY → leave factory                → EMPTY
 - Loading bay wins over parking if both apply  
 - On road: **LOADED** (filled) or **EMPTY** / **PARK** at yards  
 - WhatsApp on transitions + live track link (`/track/<imei>`)  
-- Factory unload hubs: `src/lib/factory-points.ts`  
+- Factory yards: Google Maps pins in `src/lib/factory-points.ts` (per-plant radius from nearest neighbor)  
 - Set `APP_PUBLIC_URL` for WhatsApp live-track links  
 - Production status memory: **Upstash Redis** (`KV_REST_API_URL` / `KV_REST_API_TOKEN`)
 - Fleet positions: cached in Redis. While the dashboard is open, stale snapshots trigger a **background ProTrack refresh** (no wait on the browser). On Hobby, Vercel Cron warms cache once daily; upgrade to Pro for every-minute cron. `/api/trucks` reads the cache (fast). First cold load may still wait on ProTrack (~20–25s).

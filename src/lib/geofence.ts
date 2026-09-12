@@ -92,17 +92,24 @@ export function findNearestParkingPoint(
 export function findNearestFactoryPoint(
   lat: number,
   lng: number,
-  radiusM: number,
+  fallbackRadiusM: number,
 ): { point: FactoryPoint; distanceM: number } | null {
   let best: { point: FactoryPoint; distanceM: number } | null = null;
   for (const point of FACTORY_POINTS) {
-    const r = point.radiusM && point.radiusM > 0 ? point.radiusM : radiusM;
+    const r =
+      point.radiusM && point.radiusM > 0 ? point.radiusM : fallbackRadiusM;
     const distanceM = haversineMeters(lat, lng, point.lat, point.lng);
+    // Nearest pin inside its own radius wins (handles close factories).
     if (distanceM <= r && (!best || distanceM < best.distanceM)) {
       best = { point, distanceM };
     }
   }
   return best;
+}
+
+export function isKnownFactoryId(id: string | null | undefined): boolean {
+  if (!id) return false;
+  return FACTORY_POINTS.some((p) => p.id === id);
 }
 
 export function normalizeMemory(
@@ -234,7 +241,9 @@ export function nextStatus(params: {
 
     const wasAtFactory =
       prev.status === "AT_FACTORY" ||
-      (prev.geofenceKind === "factory" && prev.geofenceId != null);
+      (prev.geofenceKind === "factory" &&
+        prev.geofenceId != null &&
+        isKnownFactoryId(prev.geofenceId));
     const outsideStreak = wasAtFactory ? prev.outsideStreak + 1 : 0;
 
     if (wasAtFactory && outsideStreak >= 2) {
