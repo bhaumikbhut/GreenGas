@@ -58,6 +58,11 @@ function newId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function isUnknownLoadedFrom(value: string | null | undefined): boolean {
+  const v = (value || "").trim().toLowerCase();
+  return !v || v === "unknown loading point" || v === "unknown";
+}
+
 /** Open a trip when truck becomes LOADED (filled at port). */
 export async function openTrip(input: {
   imei: string;
@@ -72,10 +77,24 @@ export async function openTrip(input: {
     (t) => t.imei === input.imei && t.status !== "DELIVERED",
   );
   if (existing) {
-    // Already in transit / at factory — keep; refresh fill source if empty.
-    if (!existing.loadedFrom && input.loadedFrom) {
-      existing.loadedFrom = input.loadedFrom;
+    const nextFrom = input.loadedFrom?.trim();
+    const better =
+      nextFrom &&
+      !isUnknownLoadedFrom(nextFrom) &&
+      isUnknownLoadedFrom(existing.loadedFrom);
+    const empty = !existing.loadedFrom && nextFrom;
+    if (better || empty) {
+      existing.loadedFrom = nextFrom;
       existing.port = input.port ?? existing.port;
+      await writeAll(trips);
+    } else if (
+      nextFrom &&
+      !isUnknownLoadedFrom(nextFrom) &&
+      existing.loadedFrom !== nextFrom &&
+      input.port &&
+      !existing.port
+    ) {
+      existing.port = input.port;
       await writeAll(trips);
     }
     return existing;
@@ -87,7 +106,9 @@ export async function openTrip(input: {
     plate: input.plate,
     productLine: input.productLine,
     port: input.port,
-    loadedFrom: input.loadedFrom || "Unknown loading point",
+    loadedFrom: isUnknownLoadedFrom(input.loadedFrom)
+      ? "Unknown loading point"
+      : input.loadedFrom,
     factory: null,
     status: "IN_TRANSIT",
     loadedAt: input.at || new Date().toISOString(),
@@ -97,6 +118,31 @@ export async function openTrip(input: {
   trips.unshift(trip);
   await writeAll(trips);
   return trip;
+}
+
+/**
+ * Replace "Unknown loading point" on open + recent trips for this IMEI
+ * when GPS/history discovers the real bay.
+ */
+export async function fillUnknownLoadedFrom(input: {
+  imei: string;
+  loadedFrom: string;
+  port?: string | null;
+}): Promise<number> {
+  const nextFrom = input.loadedFrom?.trim();
+  if (!nextFrom || isUnknownLoadedFrom(nextFrom)) return 0;
+
+  const trips = await readAll();
+  let changed = 0;
+  for (const t of trips) {
+    if (t.imei !== input.imei) continue;
+    if (!isUnknownLoadedFrom(t.loadedFrom)) continue;
+    t.loadedFrom = nextFrom;
+    if (input.port) t.port = input.port;
+    changed += 1;
+  }
+  if (changed) await writeAll(trips);
+  return changed;
 }
 
 /** Mark arrival when status becomes AT_FACTORY. */

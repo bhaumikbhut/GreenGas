@@ -12,6 +12,8 @@ export type ProtrackDevice = {
   plate: string;
   accountLabel: "LPG" | "PROPANE";
   account: string;
+  /** Portal internal device id (needed for playback). */
+  deviceId?: string;
 };
 
 export type ProtrackTrackPoint = {

@@ -35,8 +35,8 @@ export async function writeFleetSnapshot(
 ): Promise<void> {
   const redis = getRedis();
   if (redis) {
-    // Keep longer than cron gap so cold starts still have data.
-    await redis.set(FLEET_SNAPSHOT_KEY, snapshot, { ex: 60 * 30 });
+    // Persist across cron gaps + overnight; UI refresh still uses FLEET_FRESH_SEC.
+    await redis.set(FLEET_SNAPSHOT_KEY, snapshot, { ex: 60 * 60 * 24 * 7 });
     return;
   }
 

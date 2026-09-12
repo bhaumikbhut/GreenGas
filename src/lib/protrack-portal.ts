@@ -374,6 +374,12 @@ async function fetchPortalFleetOnce(
     const online = isOnlineFromPortal(row, payload.servertime);
     const hasFix = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
 
+    const deviceIdRaw = row.deviceid ?? row.device_id ?? row.id;
+    const deviceId =
+      deviceIdRaw != null && String(deviceIdRaw).trim()
+        ? String(deviceIdRaw).trim()
+        : undefined;
+
     rows.push({
       device: {
         imei,
@@ -381,6 +387,7 @@ async function fetchPortalFleetOnce(
         plate,
         accountLabel: acc.label,
         account: acc.account,
+        deviceId,
       },
       track: {
         imei,
@@ -397,6 +404,226 @@ async function fetchPortalFleetOnce(
   }
 
   return rows;
+}
+
+export type PortalPlaybackPoint = {
+  latitude: number;
+  longitude: number;
+  /** Unix seconds (normalized from portal ms). */
+  gpstime: number;
+  speed: number;
+  course: number;
+};
+
+type PortalPlaybackResponse = {
+  errorcode?: number;
+  errormsg?: string;
+  record?: string;
+};
+
+function parsePlaybackRecord(record: string | undefined): PortalPlaybackPoint[] {
+  if (!record || typeof record !== "string") return [];
+  const points: PortalPlaybackPoint[] = [];
+  for (const line of record.split(";")) {
+    if (!line) continue;
+    const parts = line.split(",");
+    if (parts.length < 3) continue;
+    const lng = Number(parts[0]);
+    const lat = Number(parts[1]);
+    const gpstime = toEpochSeconds(parts[2]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !gpstime) continue;
+    if (lat === 0 && lng === 0) continue;
+    points.push({
+      latitude: lat,
+      longitude: lng,
+      gpstime,
+      speed: Number(parts[3] ?? 0) || 0,
+      course: Number(parts[4] ?? 0) || 0,
+    });
+  }
+  return points;
+}
+
+function toPortalMs(epochSecOrMs: number): number {
+  if (!Number.isFinite(epochSecOrMs) || epochSecOrMs <= 0) return 0;
+  return epochSecOrMs > 1e12 ? Math.floor(epochSecOrMs) : Math.floor(epochSecOrMs * 1000);
+}
+
+async function lookupDeviceOnAccount(
+  acc: ProtrackAccount,
+  imei: string,
+): Promise<{ deviceId: string; plate: string; name: string } | null> {
+  const rows = await fetchPortalFleet(acc);
+  const hit = rows.find((r) => r.device.imei === imei);
+  if (!hit?.device.deviceId) return null;
+  return {
+    deviceId: hit.device.deviceId,
+    plate: hit.device.plate,
+    name: hit.device.name,
+  };
+}
+
+/**
+ * Portal history bridge — same login as live GPS.
+ * Calls LocationService?method=playback (not OpenAPI /api/playback).
+ */
+export async function fetchPortalPlayback(options: {
+  imei: string;
+  /** Unix seconds or ms. */
+  begin: number;
+  /** Unix seconds or ms. */
+  end: number;
+  /** Prefer this product account; otherwise try both. */
+  accountLabel?: "LPG" | "PROPANE";
+  /** Skip IMEI lookup when known. */
+  deviceId?: string;
+  account?: ProtrackAccount;
+  /** Max pages (each page up to ~1000 points). */
+  maxPages?: number;
+}): Promise<{
+  imei: string;
+  deviceId: string;
+  plate: string;
+  accountLabel: "LPG" | "PROPANE";
+  account: string;
+  points: PortalPlaybackPoint[];
+  pages: number;
+}> {
+  const imei = options.imei.trim();
+  if (!imei) throw new Error("imei required");
+
+  const beginMs = toPortalMs(options.begin);
+  const endMs = toPortalMs(options.end);
+  if (!beginMs || !endMs || endMs <= beginMs) {
+    throw new Error("invalid begin/end range");
+  }
+
+  let acc: ProtrackAccount | null = options.account ?? null;
+  let deviceId = options.deviceId?.trim() || "";
+  let plate = "";
+  let name = "";
+
+  if (!acc || !deviceId) {
+    const accounts = getConfiguredAccounts().filter((a) =>
+      options.accountLabel ? a.label === options.accountLabel : true,
+    );
+    if (!accounts.length) throw new Error("No ProTrack accounts configured");
+
+    for (const candidate of accounts) {
+      const found = await lookupDeviceOnAccount(candidate, imei);
+      if (found) {
+        acc = candidate;
+        deviceId = found.deviceId;
+        plate = found.plate;
+        name = found.name;
+        break;
+      }
+    }
+  }
+  if (!acc || !deviceId) {
+    throw new Error(`Device ${imei} not found on portal accounts`);
+  }
+
+  // Plate optional when deviceId was supplied by caller
+  if (!plate) plate = imei;
+
+  const maxPages = Math.max(1, Math.min(options.maxPages ?? 40, 80));
+  const pageSize = 1000;
+  const points: PortalPlaybackPoint[] = [];
+  let cursorMs = beginMs;
+  let pages = 0;
+
+  const fetchPage = async (fromMs: number, allowRetry: boolean) => {
+    const session = await portalLogin(acc!);
+    const payload = await postForm<PortalPlaybackResponse>(
+      `${GPS_DATA_URL}/LocationService?method=playback`,
+      {
+        token: session.token,
+        customerid: session.customerId,
+        version: process.env.PROTRACK_PORTAL_VERSION || "20260903101324",
+        _t: String(Date.now()),
+        lang: "en-us",
+        fromweb: "1",
+        timezone: String(tzOffsetMinutes()),
+        deviceid: deviceId,
+        begintime: String(fromMs),
+        endtime: String(endMs),
+        maptype: "google",
+        count: String(pageSize),
+      },
+    );
+    // Rate limit — back off and retry a few times
+    if (payload.errorcode === 10009) {
+      if (!allowRetry) {
+        throw new Error(
+          `Portal playback failed for ${imei}: code=10009 Over TPS Limit`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, 2500));
+      await clearSession(acc!.account);
+      return fetchPage(fromMs, false);
+    }
+    if (payload.errorcode !== 0) {
+      await clearSession(acc!.account);
+      if (allowRetry) return fetchPage(fromMs, false);
+      throw new Error(
+        `Portal playback failed for ${imei}: code=${payload.errorcode} ${payload.errormsg || ""}`.trim(),
+      );
+    }
+    return parsePlaybackRecord(payload.record);
+  };
+
+  while (cursorMs < endMs && pages < maxPages) {
+    pages += 1;
+    // Rate-limit retries inside fetchPage (one backoff). Extra attempts for TPS.
+    let attempt = 0;
+    const maxAttempts = 4;
+    let pagePts: PortalPlaybackPoint[] = [];
+    while (attempt < maxAttempts) {
+      attempt += 1;
+      try {
+        pagePts = await fetchPage(cursorMs, true);
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.includes("10009") || attempt >= maxAttempts) throw err;
+        await new Promise((r) => setTimeout(r, 3000 * attempt));
+      }
+    }
+    if (!pagePts.length) break;
+    points.push(...pagePts);
+    const lastMs = toPortalMs(pagePts[pagePts.length - 1].gpstime);
+    if (!lastMs || lastMs <= cursorMs) break;
+    cursorMs = lastMs + 1;
+    if (pagePts.length < pageSize) break;
+    // Soft pacing between pages
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  // Deduplicate consecutive identical stamps
+  const deduped: PortalPlaybackPoint[] = [];
+  for (const p of points) {
+    const prev = deduped[deduped.length - 1];
+    if (
+      prev &&
+      prev.gpstime === p.gpstime &&
+      prev.latitude === p.latitude &&
+      prev.longitude === p.longitude
+    ) {
+      continue;
+    }
+    deduped.push(p);
+  }
+
+  return {
+    imei,
+    deviceId,
+    plate: plate || name || imei,
+    accountLabel: acc.label,
+    account: acc.account,
+    points: deduped,
+    pages,
+  };
 }
 
 /** Pull both LPG (GGLPG) and Propane (GG11) fleets from portal. */

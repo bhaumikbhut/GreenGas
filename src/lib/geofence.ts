@@ -10,7 +10,7 @@ import {
  *   ON_ROAD → enter parking      → PARK
  *   PARK → leave parking         → ON_ROAD
  *   PARK/ON_ROAD → enter loading → LOADING
- *   LOADING → leave loading      → LOADED (filled) only after min dwell
+ *   LOADING → leave loading      → LOADED (filled) — never empty after a load bay
  *   LOADED → enter factory       → AT_FACTORY
  *   AT_FACTORY → leave factory   → ON_ROAD (empty) + lastFactory location
  *   LOADED → re-enter loading    → LOADING (next trip; treated as empty return)
@@ -18,12 +18,12 @@ import {
  * All empty travel is ON_ROAD (merged former EMPTY + empty-on-road).
  * lastFactory is set when leaving a factory so the UI shows “Empty · left …”.
  *
- * Short visits to a loading pin (drive-through) do NOT become LOADED —
- * they fall back to PARK (if in parking) or ON_ROAD.
- * Loading points take priority over parking when both apply.
+ * Rule of thumb:
+ *   out of loading point → filled (LOADED)
+ *   out of factory       → empty (ON_ROAD)
  */
 
-/** Minimum time inside a loading bay before leave counts as filled. */
+/** @deprecated Leave-loading no longer requires dwell; kept for env compatibility. */
 export const MIN_LOADING_DWELL_MS = Number(
   process.env.MIN_LOADING_DWELL_MS || 2 * 60 * 1000,
 );
@@ -206,11 +206,6 @@ export function normalizeMemory(
   };
 }
 
-function loadingDwellOk(prev: TruckMemory, now: number): boolean {
-  if (prev.enteredAt == null) return false;
-  return now - prev.enteredAt >= MIN_LOADING_DWELL_MS;
-}
-
 export function nextStatus(params: {
   prev: TruckMemory | undefined;
   insideLoading: { point: LoadingPoint; distanceM: number } | null;
@@ -261,47 +256,6 @@ export function nextStatus(params: {
 
   // --- Filled truck ---
   if (isFilled) {
-    // Heal false LOADED (no load source): sitting in parking → PARK.
-    if (
-      !prev.lastLoadedFrom &&
-      prev.status === "LOADED" &&
-      params.insideParking &&
-      !params.insideLoading &&
-      !params.insideFactory
-    ) {
-      return {
-        ...base,
-        status: "PARK",
-        geofenceId: params.insideParking.point.id,
-        geofenceKind: "parking",
-        enteredAt: now,
-        outsideStreak: 0,
-        cargo: "EMPTY",
-        lastPark: params.insideParking.point.name,
-        lastLoadedFrom: null,
-      };
-    }
-
-    // Heal false LOADED on the road with no load source → ON_ROAD.
-    if (
-      !prev.lastLoadedFrom &&
-      prev.status === "LOADED" &&
-      !params.insideLoading &&
-      !params.insideParking &&
-      !params.insideFactory
-    ) {
-      return {
-        ...base,
-        status: "ON_ROAD",
-        geofenceId: null,
-        geofenceKind: null,
-        enteredAt: null,
-        outsideStreak: 0,
-        cargo: "EMPTY",
-        lastLoadedFrom: null,
-      };
-    }
-
     // Next trip at a *different* loading bay → start LOADING again.
     // Same bay while still LOADED = still at origin port (jitter / waiting) — keep LOADED.
     if (params.insideLoading) {
@@ -414,42 +368,16 @@ export function nextStatus(params: {
     const loadedFrom =
       fromPoint?.name ?? prev.lastLoadedFrom ?? null;
 
-    // Real fill: stayed in bay long enough.
-    if (loadingDwellOk(prev, now)) {
-      return {
-        ...base,
-        status: "LOADED",
-        geofenceId: null,
-        geofenceKind: null,
-        enteredAt: null,
-        outsideStreak: 0,
-        cargo: "LOADED",
-        lastLoadedFrom: loadedFrom,
-      };
-    }
-
-    // Drive-through / brief visit — not LOADED.
-    if (params.insideParking) {
-      return {
-        ...base,
-        status: "PARK",
-        geofenceId: params.insideParking.point.id,
-        geofenceKind: "parking",
-        enteredAt: now,
-        outsideStreak: 0,
-        cargo: "EMPTY",
-        lastPark: params.insideParking.point.name,
-      };
-    }
-
+    // Anything leaving a loading point is filled — never mark empty here.
     return {
       ...base,
-      status: "ON_ROAD",
+      status: "LOADED",
       geofenceId: null,
       geofenceKind: null,
       enteredAt: null,
       outsideStreak: 0,
-      cargo: "EMPTY",
+      cargo: "LOADED",
+      lastLoadedFrom: loadedFrom,
     };
   }
 

@@ -19,18 +19,18 @@ Live truck map + auto status from ProTrack (portal bridge) + WhatsApp alerts via
 ## Status rules (no driver input)
 
 ```text
-ON_ROAD/EMPTY → enter parking → PARK
-PARK          → leave parking → ON_ROAD
-PARK/ON_ROAD  → enter loading → LOADING
-LOADING       → leave loading → LOADED     (filled, after min dwell)
-LOADED        → enter factory → AT_FACTORY
-AT_FACTORY    → leave factory → EMPTY      (only path into EMPTY)
+ON_ROAD     → enter parking → PARK
+PARK        → leave parking → ON_ROAD
+PARK/ON_ROAD→ enter loading → LOADING
+LOADING     → leave loading → LOADED     (filled — never empty after load bay)
+LOADED      → enter factory → AT_FACTORY
+AT_FACTORY  → leave factory → ON_ROAD    (empty)
 ```
 
+- Out of **loading** → filled (`LOADED`)
+- Out of **factory** → empty (`ON_ROAD`)
 - Each loading/parking pin has its **own radius** (Neel field pins, Sep 2026)  
 - Loading bay wins over parking if both apply  
-- **EMPTY** only after leaving a factory — port / LOADING / LOADED never count as EMPTY  
-- On road empty (not post-factory): **ON_ROAD**  
 - WhatsApp on transitions + live track link (`/track/<imei>`)  
 - Factory yards: Google Maps pins in `src/lib/factory-points.ts` (per-plant radius from nearest neighbor)  
 - Set `APP_PUBLIC_URL` for WhatsApp live-track links  
@@ -39,8 +39,9 @@ AT_FACTORY    → leave factory → EMPTY      (only path into EMPTY)
 
 ## GPS source
 
-- **portal** (current): logs into protrack365.com for both accounts and reads live positions
+- **portal** (current): logs into protrack365.com for both accounts and reads live positions + history
 - **openapi**: official API (needs dealer enable; error 10007 until then)
+- History: `GET /api/playback?imei=…&hours=12` (portal `LocationService?method=playback` bridge)
 
 ## WhatsApp (Meta Cloud API)
 
