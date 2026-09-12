@@ -73,7 +73,7 @@ export const STATUS_META: Record<
     muted: "text-black/80",
   },
   LOADED: {
-    label: "Loaded",
+    label: "Filled road",
     chip: "bg-black/15 text-black",
     tile: "bg-[#00B386] text-black",
     bar: "bg-black/40",
@@ -93,14 +93,14 @@ export const STATUS_META: Record<
   EMPTY: {
     label: "Empty",
     chip: "bg-black/15 text-black",
-    tile: "bg-[#eab308] text-black",
+    tile: "bg-[#fde68a] text-black",
     bar: "bg-black/40",
-    card: "border-[#ca8a04] bg-[#eab308]",
+    card: "border-[#eab308] bg-[#fde68a]",
     title: "text-black",
     muted: "text-black/80",
   },
   ON_ROAD: {
-    label: "Road",
+    label: "Empty",
     chip: "bg-black/15 text-black",
     tile: "bg-[#fde68a] text-black",
     bar: "bg-black/40",
@@ -127,18 +127,22 @@ export function secondaryLine(t: TruckSnapshot): string | null {
     return `${t.loadingPoint}${t.distanceM != null ? ` · ${t.distanceM} m` : ""}`;
   }
   if (t.status === "LOADED" && t.lastLoadedFrom) {
-    return `Filled at ${t.lastLoadedFrom}`;
+    return `Filled · from ${t.lastLoadedFrom}`;
+  }
+  if (t.status === "LOADED") {
+    return "Filled · on road to customer";
   }
   if (t.status === "AT_FACTORY" && t.factoryPoint) {
     return `At ${t.factoryPoint}`;
   }
-  if (t.status === "EMPTY" && t.lastFactory) {
-    return `Left ${t.lastFactory}`;
+  if (t.status === "ON_ROAD" && t.lastFactory) {
+    return `Empty · left ${t.lastFactory}`;
   }
-  if (t.status === "ON_ROAD" && (t.lastPark || t.lastFactory)) {
-    return t.lastFactory
-      ? `Left ${t.lastFactory}`
-      : `Left ${t.lastPark}`;
+  if (t.status === "ON_ROAD" && t.lastPark) {
+    return `Empty · left ${t.lastPark}`;
+  }
+  if (t.status === "ON_ROAD") {
+    return "Empty · traveling";
   }
   if (!t.online) return "GPS offline";
   return null;
@@ -267,12 +271,12 @@ export function FleetProvider({ children }: { children: ReactNode }) {
 
   const trucks = useMemo(() => data?.trucks ?? [], [data]);
 
-  /** Legacy EMPTY without factory visit → ON_ROAD for list/map/filters. */
+  /** All empty travel is ON_ROAD (legacy EMPTY merged). */
   const displayTrucks = useMemo(
     () =>
       trucks.map((t) =>
-        t.status === "EMPTY" && !t.lastFactory
-          ? { ...t, status: "ON_ROAD" as const }
+        t.status === "EMPTY"
+          ? { ...t, status: "ON_ROAD" as const, cargo: "EMPTY" as const }
           : t,
       ),
     [trucks],

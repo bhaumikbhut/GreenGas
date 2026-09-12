@@ -79,7 +79,7 @@ export const LOADING_POINTS: LoadingPoint[] = [
     port: "PIPAVAV",
     lat: 20.93516,
     lng: 71.496846,
-    radiusM: 25,
+    radiusM: 100,
     kind: "loading",
   },
   {
@@ -88,7 +88,7 @@ export const LOADING_POINTS: LoadingPoint[] = [
     port: "PIPAVAV",
     lat: 20.935888,
     lng: 71.498414,
-    radiusM: 28,
+    radiusM: 100,
     kind: "loading",
   },
   {
@@ -97,7 +97,7 @@ export const LOADING_POINTS: LoadingPoint[] = [
     port: "PIPAVAV",
     lat: 20.936296,
     lng: 71.496275,
-    radiusM: 30,
+    radiusM: 80,
     kind: "parking",
   },
   {
@@ -134,7 +134,7 @@ export const LOADING_POINTS: LoadingPoint[] = [
     port: "KANDLA",
     lat: 23.028769,
     lng: 70.199516,
-    radiusM: 25,
+    radiusM: 100,
     kind: "loading",
   },
   // —— Dahej GTPCL ——
@@ -153,7 +153,8 @@ export const LOADING_POINTS: LoadingPoint[] = [
     port: "DAHEJ",
     lat: 21.692484,
     lng: 72.53928,
-    radiusM: 25,
+    // Was 25m — too tight; ProTrack often skipped the bay → false EMPTY ROAD.
+    radiusM: 120,
     kind: "loading",
   },
   {
@@ -162,7 +163,7 @@ export const LOADING_POINTS: LoadingPoint[] = [
     port: "DAHEJ",
     lat: 21.692309,
     lng: 72.540375,
-    radiusM: 25,
+    radiusM: 120,
     kind: "loading",
   },
   // —— Porbandar Confidence ——

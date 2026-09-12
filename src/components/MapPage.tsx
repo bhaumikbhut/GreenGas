@@ -17,6 +17,7 @@ export default function MapPage() {
   const {
     data,
     filtered,
+    trucks,
     selected,
     selectedImei,
     focusToken,
@@ -24,11 +25,22 @@ export default function MapPage() {
     selectTruck,
   } = useFleet();
 
+  /** Keep the selected truck on the map even if filters would hide it. */
+  const mapTrucks = (() => {
+    if (!selected) return filtered;
+    if (filtered.some((t) => t.imei === selected.imei)) return filtered;
+    return [...filtered, selected];
+  })();
+
+  // Prefer full fleet lookup if filtered list is empty but we have a selection.
+  const focusList =
+    mapTrucks.length > 0 ? mapTrucks : selected ? [selected] : trucks;
+
   return (
     <div className="relative h-full min-h-0 w-full">
       <div className="absolute inset-0">
         <TruckMap
-          trucks={filtered}
+          trucks={focusList}
           loadingPoints={data?.loadingPoints ?? []}
           factoryPoints={data?.factoryPoints ?? []}
           radiusM={data?.radiusM ?? 500}

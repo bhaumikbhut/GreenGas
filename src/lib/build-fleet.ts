@@ -5,6 +5,7 @@ import {
   findNearestLoadingPoint,
   findNearestParkingPoint,
   nextStatus,
+  normalizeMemory,
   type AutoStatus,
   type TruckMemory,
 } from "@/lib/geofence";
@@ -333,43 +334,48 @@ export async function buildFleetSnapshot(
       online: Boolean(track) && online,
     });
 
+    const prevNorm = prev ? normalizeMemory(prev) : null;
+    const leftFactory =
+      prevNorm?.status === "AT_FACTORY" &&
+      memory.status === "ON_ROAD" &&
+      Boolean(memory.lastFactory);
+
     const prevNotified = String(prev?.lastNotifiedStatus ?? "");
     const shouldAlert =
-      ALERT_STATUSES.has(memory.status) &&
-      memory.status !== memory.lastNotifiedStatus &&
-      memory.status !== prev?.lastNotifiedStatus &&
-      !(memory.status === "LOADED" && prevNotified === "RELEASED") &&
-      !(
-        memory.status === "EMPTY" &&
-        prevNotified !== "AT_FACTORY" &&
-        String(prev?.status ?? "") !== "AT_FACTORY"
-      );
+      leftFactory ||
+      (ALERT_STATUSES.has(memory.status) &&
+        memory.status !== memory.lastNotifiedStatus &&
+        memory.status !== prev?.lastNotifiedStatus &&
+        !(memory.status === "LOADED" && prevNotified === "RELEASED"));
 
     if (shouldAlert && !skipAlerts) {
+      const alertStatus = leftFactory
+        ? ("EMPTY" as const)
+        : (memory.status as
+            | "PARK"
+            | "LOADING"
+            | "LOADED"
+            | "AT_FACTORY"
+            | "EMPTY");
       const locationName =
         insideLoading?.point.name ||
         insideParking?.point.name ||
         insideFactory?.point.name ||
-        (memory.status === "LOADED"
-          ? memory.lastLoadedFrom || "Port (departed)"
-          : memory.status === "EMPTY"
-            ? memory.lastFactory || "Factory (departed)"
+        (leftFactory
+          ? memory.lastFactory || "Factory (departed)"
+          : memory.status === "LOADED"
+            ? memory.lastLoadedFrom || "Port (departed)"
             : memory.status === "ON_ROAD"
-              ? memory.lastPark || memory.lastFactory || "On road"
-            : memory.status === "PARK"
-              ? memory.lastPark || "Parking"
-              : "Unknown");
+              ? memory.lastFactory || memory.lastPark || "On road"
+              : memory.status === "PARK"
+                ? memory.lastPark || "Parking"
+                : "Unknown");
 
       const result = await sendWhatsAppAlert({
         plate: device.plate,
         imei: device.imei,
         productLine: device.accountLabel,
-        status: memory.status as
-          | "PARK"
-          | "LOADING"
-          | "LOADED"
-          | "AT_FACTORY"
-          | "EMPTY",
+        status: alertStatus,
         locationName,
         port:
           insideLoading?.point.port ??
@@ -383,7 +389,7 @@ export async function buildFleetSnapshot(
       await appendNotification({
         imei: device.imei,
         plate: device.plate,
-        status: memory.status,
+        status: leftFactory ? "EMPTY" : memory.status,
         locationName,
         ok: result.ok,
         provider: result.provider,
@@ -393,14 +399,14 @@ export async function buildFleetSnapshot(
 
       alerts.push({
         plate: device.plate,
-        status: memory.status,
+        status: leftFactory ? "EMPTY" : memory.status,
         ok: result.ok,
         provider: result.provider,
         error: result.error,
       });
 
       if (result.ok) {
-        memory.lastNotifiedStatus = memory.status;
+        memory.lastNotifiedStatus = leftFactory ? "EMPTY" : memory.status;
         memory.lastNotifiedAt = Date.now();
       }
     }

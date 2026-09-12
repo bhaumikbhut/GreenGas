@@ -47,7 +47,6 @@ export default function FleetPage() {
                 ["LOADING", counts.LOADING],
                 ["LOADED", counts.LOADED],
                 ["AT_FACTORY", counts.AT_FACTORY],
-                ["EMPTY", counts.EMPTY],
                 ["ON_ROAD", counts.ON_ROAD],
                 ["OFFLINE", counts.OFFLINE],
               ] as const

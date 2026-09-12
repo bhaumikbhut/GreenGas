@@ -7,16 +7,16 @@ import {
 
 /**
  * Trip cycle (GPS only, per-site radius):
- *   ON_ROAD/EMPTY → enter parking → PARK
+ *   ON_ROAD → enter parking      → PARK
  *   PARK → leave parking         → ON_ROAD
  *   PARK/ON_ROAD → enter loading → LOADING
  *   LOADING → leave loading      → LOADED (filled) only after min dwell
  *   LOADED → enter factory       → AT_FACTORY
- *   AT_FACTORY → leave factory   → EMPTY   ← only path into EMPTY
+ *   AT_FACTORY → leave factory   → ON_ROAD (empty) + lastFactory location
  *   LOADED → re-enter loading    → LOADING (next trip; treated as empty return)
  *
- * EMPTY is only set after leaving a factory. Port / LOADING / LOADED trucks
- * never appear in EMPTY. Other empty travel uses ON_ROAD.
+ * All empty travel is ON_ROAD (merged former EMPTY + empty-on-road).
+ * lastFactory is set when leaving a factory so the UI shows “Empty · left …”.
  *
  * Short visits to a loading pin (drive-through) do NOT become LOADED —
  * they fall back to PARK (if in parking) or ON_ROAD.
@@ -25,7 +25,7 @@ import {
 
 /** Minimum time inside a loading bay before leave counts as filled. */
 export const MIN_LOADING_DWELL_MS = Number(
-  process.env.MIN_LOADING_DWELL_MS || 3 * 60 * 1000,
+  process.env.MIN_LOADING_DWELL_MS || 2 * 60 * 1000,
 );
 export type AutoStatus =
   | "PARK"
@@ -162,8 +162,8 @@ export function normalizeMemory(
     status = "LOADED";
     cargo = "LOADED";
   } else if (raw === "EMPTY") {
-    // EMPTY is post-factory only. Legacy EMPTY without a factory visit → ON_ROAD.
-    status = prev.lastFactory ? "EMPTY" : "ON_ROAD";
+    // Legacy EMPTY merged into ON_ROAD (keep lastFactory for UI).
+    status = "ON_ROAD";
     cargo = "EMPTY";
   } else if (raw === "ON_ROAD") {
     status = "ON_ROAD";
@@ -282,8 +282,7 @@ export function nextStatus(params: {
       };
     }
 
-    // Heal false LOADED on the road with no load source → ON_ROAD (not EMPTY).
-    // EMPTY is reserved for leave-factory only; never dump LOADED into EMPTY.
+    // Heal false LOADED on the road with no load source → ON_ROAD.
     if (
       !prev.lastLoadedFrom &&
       prev.status === "LOADED" &&
@@ -358,7 +357,7 @@ export function nextStatus(params: {
     if (wasAtFactory && outsideFactoryStreak >= 2) {
       return {
         ...base,
-        status: "EMPTY",
+        status: "ON_ROAD",
         geofenceId: null,
         geofenceKind: null,
         enteredAt: null,
@@ -508,20 +507,7 @@ export function nextStatus(params: {
     };
   }
 
-  // Still post-factory empty until next park/load.
-  if (prev.status === "EMPTY" && prev.lastFactory) {
-    return {
-      ...base,
-      status: "EMPTY",
-      geofenceId: null,
-      geofenceKind: null,
-      enteredAt: null,
-      outsideStreak: 0,
-      cargo: "EMPTY",
-      lastFactory: prev.lastFactory,
-    };
-  }
-
+  // Empty on road (includes post-factory; lastFactory kept via base).
   return {
     ...base,
     status: "ON_ROAD",

@@ -17,20 +17,18 @@ export const maxDuration = 60;
 export type { TruckSnapshot, FleetSnapshot };
 
 /**
- * EMPTY is only valid after leaving a factory. Remap legacy cached rows so the
- * UI does not show a huge Empty count for ordinary on-road trucks.
+ * Merge legacy EMPTY into ON_ROAD (keep lastFactory for “left factory” line).
  */
 function healLegacyEmpty(snapshot: FleetSnapshot): FleetSnapshot {
   let changed = false;
   const trucks = snapshot.trucks.map((t) => {
-    if (t.status === "EMPTY" && !t.lastFactory) {
+    if (t.status === "EMPTY") {
       changed = true;
       return { ...t, status: "ON_ROAD" as const, cargo: "EMPTY" as const };
     }
     return t;
   });
   if (!changed) {
-    // Still ensure statusCounts includes ON_ROAD key for older snapshots.
     if (snapshot.statusCounts && snapshot.statusCounts.ON_ROAD == null) {
       return {
         ...snapshot,

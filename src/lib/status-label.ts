@@ -8,13 +8,12 @@ export function statusLabel(status: AutoStatus | string): string {
     case "LOADING":
       return "LOADING";
     case "LOADED":
-      return "LOADED · FILLED";
+      return "FILLED ROAD";
     case "AT_FACTORY":
       return "AT FACTORY · FILLED";
     case "EMPTY":
-      return "EMPTY";
     case "ON_ROAD":
-      return "ON ROAD";
+      return "EMPTY";
     case "OFFLINE":
       return "OFFLINE";
     default:
@@ -26,6 +25,7 @@ export function statusLabel(status: AutoStatus | string): string {
 export function statusBadge(status: AutoStatus | string): string {
   if (status === "AT_FACTORY") return "FACTORY";
   if (status === "PARK") return "PARK";
-  if (status === "ON_ROAD") return "ROAD";
+  if (status === "ON_ROAD" || status === "EMPTY") return "EMPTY";
+  if (status === "LOADED") return "FILLED";
   return String(status);
 }

@@ -310,7 +310,8 @@ function FocusTruck({
   mode?: "fleet" | "live";
 }) {
   const map = useMap();
-  const lastFocusToken = useRef(focusToken);
+  /** null = not focused yet this map mount (card → /map must fly+zoom). */
+  const lastFocusToken = useRef<number | null>(null);
 
   useEffect(() => {
     if (!selectedImei) return;
@@ -325,7 +326,8 @@ function FocusTruck({
     }
 
     const zoom = 15;
-    const hardFocus = lastFocusToken.current !== focusToken;
+    const hardFocus =
+      lastFocusToken.current === null || lastFocusToken.current !== focusToken;
     lastFocusToken.current = focusToken;
 
     const go = () => {
@@ -333,7 +335,7 @@ function FocusTruck({
       const size = map.getSize();
       if (!size.x || !size.y) return false;
       if (hardFocus || mode === "live") {
-        map.flyTo([selected.lat!, selected.lng!], zoom, { duration: 0.7 });
+        map.flyTo([selected.lat!, selected.lng!], zoom, { duration: 0.75 });
       } else {
         map.panTo([selected.lat!, selected.lng!], {
           animate: true,
@@ -347,20 +349,13 @@ function FocusTruck({
 
     const t1 = window.setTimeout(() => go(), 50);
     const t2 = window.setTimeout(() => go(), 200);
+    const t3 = window.setTimeout(() => go(), 500);
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
+      window.clearTimeout(t3);
     };
-  }, [
-    map,
-    trucks,
-    selectedImei,
-    focusToken,
-    mode,
-    // re-follow on live GPS updates
-    trucks.find((t) => t.imei === selectedImei)?.lat,
-    trucks.find((t) => t.imei === selectedImei)?.lng,
-  ]);
+  }, [map, selectedImei, focusToken, mode, trucks]);
 
   return null;
 }
@@ -524,10 +519,12 @@ export default function TruckMap({
             <Popup>
               <strong>{t.plate}</strong>
               <br />
-              {t.productLine} · {t.status}
+              {t.productLine} · {t.status === "ON_ROAD" ? "EMPTY ROAD" : t.status === "LOADED" ? "FILLED ROAD" : t.status}
               {t.status === "LOADED" || t.status === "AT_FACTORY"
                 ? " · FILLED"
-                : ""}
+                : t.status === "ON_ROAD" || t.status === "EMPTY"
+                  ? " · EMPTY"
+                  : ""}
               <br />
               Speed: {t.speed} km/h
               {t.lastLoadedFrom ? (

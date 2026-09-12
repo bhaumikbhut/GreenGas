@@ -177,11 +177,11 @@ m = nextStatus({
   now: afterDwell + 8000,
 });
 assert(
-  m.status === "EMPTY" && m.cargo === "EMPTY" && m.lastFactory === factoryPt.name,
-  "AT_FACTORY leave → EMPTY",
+  m.status === "ON_ROAD" && m.cargo === "EMPTY" && m.lastFactory === factoryPt.name,
+  "AT_FACTORY leave → ON_ROAD with lastFactory",
 );
 
-// EMPTY stays EMPTY until park/load (not flipped away randomly)
+// Post-factory empty stays ON_ROAD and keeps factory location
 m = nextStatus({
   prev: m,
   insideLoading: none,
@@ -190,7 +190,10 @@ m = nextStatus({
   online: true,
   now: afterDwell + 9000,
 });
-assert(m.status === "EMPTY", "EMPTY persists on road after factory");
+assert(
+  m.status === "ON_ROAD" && m.lastFactory === factoryPt.name,
+  "ON_ROAD keeps lastFactory after leave",
+);
 
 const bad = nextStatus({
   prev: {
