@@ -7,9 +7,14 @@ import { useFleet } from "@/components/FleetProvider";
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { trucks, filtered, updatedLabel, data } = useFleet();
+  const { trucks, filtered, updatedLabel, data, productFilter, statusFilter } =
+    useFleet();
   const onMap = pathname === "/map";
   const onFleet = pathname === "/" || pathname === "";
+  const productScoped =
+    productFilter === "ALL"
+      ? trucks.length
+      : trucks.filter((t) => t.productLine === productFilter).length;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[var(--gg-bg)] text-[var(--gg-ink)]">
@@ -29,10 +34,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
               </span>
             </div>
             <p className="mt-0.5 truncate text-[11px] text-[#c5ddd0] lg:text-xs">
-              {trucks.length} trucks
+              {productScoped} trucks
+              {productFilter !== "ALL" ? (
+                <span className="opacity-80">
+                  {" "}
+                  ({productFilter === "LPG" ? "LPG" : "Propane"})
+                </span>
+              ) : null}
               <span className="mx-1.5 text-white/30">·</span>
               Updated {updatedLabel}
-              {onFleet ? (
+              {onFleet &&
+              (statusFilter !== "ALL" ||
+                productFilter !== "ALL" ||
+                filtered.length !== productScoped) ? (
                 <>
                   <span className="mx-1.5 text-white/30">·</span>
                   Showing {filtered.length}

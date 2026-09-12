@@ -21,6 +21,7 @@ export default function FleetPage() {
     parkingFilter,
     parkingOptions,
     parkingCounts,
+    productCounts,
     data,
     setQuery,
     setStatusFilter,
@@ -104,8 +105,8 @@ export default function FleetPage() {
                   {key !== "ALL" ? (
                     <span className="ml-1 opacity-70">
                       {key === "LPG"
-                        ? data?.productCounts?.LPG ?? 0
-                        : data?.productCounts?.PROPANE ?? 0}
+                        ? productCounts.LPG
+                        : productCounts.PROPANE}
                     </span>
                   ) : null}
                 </button>

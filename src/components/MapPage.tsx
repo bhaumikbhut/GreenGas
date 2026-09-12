@@ -16,7 +16,7 @@ const TruckMap = dynamic(() => import("@/components/TruckMap"), {
 export default function MapPage() {
   const {
     data,
-    trucks,
+    filtered,
     selected,
     selectedImei,
     focusToken,
@@ -28,7 +28,7 @@ export default function MapPage() {
     <div className="relative h-full min-h-0 w-full">
       <div className="absolute inset-0">
         <TruckMap
-          trucks={trucks}
+          trucks={filtered}
           loadingPoints={data?.loadingPoints ?? []}
           factoryPoints={data?.factoryPoints ?? []}
           radiusM={data?.radiusM ?? 500}

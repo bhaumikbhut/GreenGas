@@ -159,6 +159,7 @@ type FleetContextValue = {
   parkingFilter: string;
   parkingOptions: string[];
   parkingCounts: Record<string, number>;
+  productCounts: { LPG: number; PROPANE: number };
   updatedLabel: string;
   setQuery: (q: string) => void;
   setStatusFilter: (s: string | ((prev: string) => string)) => void;
@@ -179,6 +180,8 @@ export function useFleet() {
 export function FleetProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<FleetApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Wall-clock when the UI last received fleet data (browser refresh resets this). */
+  const [dataReceivedAt, setDataReceivedAt] = useState<number | null>(null);
   const [selectedImei, setSelectedImei] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -187,6 +190,11 @@ export function FleetProvider({ children }: { children: ReactNode }) {
   );
   const [parkingFilter, setParkingFilter] = useState<string>("ALL");
   const [focusToken, setFocusToken] = useState(0);
+
+  const applyFleet = useCallback((json: FleetApiResponse) => {
+    setData(json);
+    setDataReceivedAt(Date.now());
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -197,7 +205,7 @@ export function FleetProvider({ children }: { children: ReactNode }) {
         res = await fetch("/api/trucks", { cache: "no-store" });
       }
       const json = (await res.json()) as FleetApiResponse;
-      setData(json);
+      applyFleet(json);
     } catch (err) {
       setData({
         ok: false,
@@ -209,7 +217,7 @@ export function FleetProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyFleet]);
 
   const refreshLive = useCallback(async () => {
     if (
@@ -222,29 +230,40 @@ export function FleetProvider({ children }: { children: ReactNode }) {
       const res = await fetch("/api/trucks?live=1", { cache: "no-store" });
       if (!res.ok) return;
       const json = (await res.json()) as FleetApiResponse;
-      if (json.trucks?.length) setData(json);
+      if (json.trucks?.length) applyFleet(json);
     } catch {
       // keep last good cache
     }
-  }, []);
+  }, [applyFleet]);
 
   useEffect(() => {
-    void refresh();
-    const fast = setInterval(() => void refresh(), 60000);
-    const live = setInterval(() => void refreshLive(), 180000);
+    // Cache first (fast paint), then live ProTrack so browser refresh
+    // resets "Updated" to just now with fresh GPS.
+    void (async () => {
+      await refresh();
+      await refreshLive();
+    })();
+    // Cache read often (picks up background ProTrack refreshes quickly).
+    const fast = setInterval(() => void refresh(), 30000);
+    // Live ProTrack pull — dots move with real GPS (not a static cache pin).
+    const live = setInterval(() => void refreshLive(), 60000);
     const onVisible = () => {
       if (document.visibilityState === "visible") void refreshLive();
     };
     document.addEventListener("visibilitychange", onVisible);
-    // Don't stampede ProTrack on boot — wait until cache exists.
-    const boot = setTimeout(() => void refreshLive(), 90000);
     return () => {
       clearInterval(fast);
       clearInterval(live);
-      clearTimeout(boot);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh, refreshLive]);
+
+  /** Recompute “Updated Xm ago” so the label tracks wall-clock time. */
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 15000);
+    return () => clearInterval(id);
+  }, []);
 
   const trucks = useMemo(() => data?.trucks ?? [], [data]);
 
@@ -270,29 +289,12 @@ export function FleetProvider({ children }: { children: ReactNode }) {
     return [...fromConfig, ...extras];
   }, [displayTrucks]);
 
-  const parkingCounts = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const name of parkingOptions) c[name] = 0;
-    for (const t of displayTrucks) {
-      if (t.status !== "PARK") continue;
-      const key = t.parkingPoint || t.lastPark;
-      if (!key) continue;
-      c[key] = (c[key] ?? 0) + 1;
-    }
-    return c;
-  }, [displayTrucks, parkingOptions]);
-
-  const filtered = useMemo(() => {
+  /** Product + search scope (status tiles / parking counts follow this). */
+  const scopedTrucks = useMemo(() => {
     const q = query.trim().toLowerCase();
     return displayTrucks.filter((t) => {
-      if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
       if (productFilter !== "ALL" && t.productLine !== productFilter)
         return false;
-      if (parkingFilter !== "ALL" && statusFilter === "PARK") {
-        const at =
-          t.parkingPoint === parkingFilter || t.lastPark === parkingFilter;
-        if (!at) return false;
-      }
       if (!q) return true;
       return (
         t.plate.toLowerCase().includes(q) ||
@@ -300,7 +302,31 @@ export function FleetProvider({ children }: { children: ReactNode }) {
         t.productLine.toLowerCase().includes(q)
       );
     });
-  }, [displayTrucks, query, statusFilter, productFilter, parkingFilter]);
+  }, [displayTrucks, productFilter, query]);
+
+  const parkingCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const name of parkingOptions) c[name] = 0;
+    for (const t of scopedTrucks) {
+      if (t.status !== "PARK") continue;
+      const key = t.parkingPoint || t.lastPark;
+      if (!key) continue;
+      c[key] = (c[key] ?? 0) + 1;
+    }
+    return c;
+  }, [scopedTrucks, parkingOptions]);
+
+  const filtered = useMemo(() => {
+    return scopedTrucks.filter((t) => {
+      if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
+      if (parkingFilter !== "ALL" && statusFilter === "PARK") {
+        const at =
+          t.parkingPoint === parkingFilter || t.lastPark === parkingFilter;
+        if (!at) return false;
+      }
+      return true;
+    });
+  }, [scopedTrucks, statusFilter, parkingFilter]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {
@@ -312,13 +338,35 @@ export function FleetProvider({ children }: { children: ReactNode }) {
       ON_ROAD: 0,
       OFFLINE: 0,
     };
-    for (const t of displayTrucks) {
+    for (const t of scopedTrucks) {
       if (c[t.status] != null) c[t.status] += 1;
       else c.ON_ROAD += 1;
     }
     return c;
-  }, [displayTrucks]);
+  }, [scopedTrucks]);
 
+  /** Product totals within current status (+ parking) filter for the All/LPG/Propane chips. */
+  const productCounts = useMemo(() => {
+    const base = displayTrucks.filter((t) => {
+      if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
+      if (parkingFilter !== "ALL" && statusFilter === "PARK") {
+        const at =
+          t.parkingPoint === parkingFilter || t.lastPark === parkingFilter;
+        if (!at) return false;
+      }
+      const q = query.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        t.plate.toLowerCase().includes(q) ||
+        t.name.toLowerCase().includes(q) ||
+        t.productLine.toLowerCase().includes(q)
+      );
+    });
+    return {
+      LPG: base.filter((t) => t.productLine === "LPG").length,
+      PROPANE: base.filter((t) => t.productLine === "PROPANE").length,
+    };
+  }, [displayTrucks, statusFilter, parkingFilter, query]);
   const selected = useMemo(() => {
     if (!selectedImei) return null;
     return (
@@ -333,14 +381,19 @@ export function FleetProvider({ children }: { children: ReactNode }) {
     setFocusToken((n) => n + 1);
   }, []);
 
-  const updatedLabel = data?.fetchedAt
-    ? new Date(data.fetchedAt).toLocaleTimeString("en-IN", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : loading
-      ? "…"
-      : "—";
+  const updatedLabel = useMemo(() => {
+    void nowTick;
+    if (dataReceivedAt == null) return loading ? "…" : "—";
+    const ageSec = Math.max(0, Math.round((Date.now() - dataReceivedAt) / 1000));
+    if (ageSec < 45) return "just now";
+    if (ageSec < 90) return "1m ago";
+    if (ageSec < 3600) return `${Math.floor(ageSec / 60)}m ago`;
+    const clock = new Date(dataReceivedAt).toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return `${clock} (${Math.floor(ageSec / 60)}m ago)`;
+  }, [dataReceivedAt, loading, nowTick]);
 
   const value: FleetContextValue = {
     data,
@@ -357,6 +410,7 @@ export function FleetProvider({ children }: { children: ReactNode }) {
     parkingFilter,
     parkingOptions,
     parkingCounts,
+    productCounts,
     updatedLabel,
     setQuery,
     setStatusFilter,
