@@ -248,32 +248,43 @@ export function FleetProvider({ children }: { children: ReactNode }) {
 
   const trucks = useMemo(() => data?.trucks ?? [], [data]);
 
+  /** Legacy EMPTY without factory visit → ON_ROAD for list/map/filters. */
+  const displayTrucks = useMemo(
+    () =>
+      trucks.map((t) =>
+        t.status === "EMPTY" && !t.lastFactory
+          ? { ...t, status: "ON_ROAD" as const }
+          : t,
+      ),
+    [trucks],
+  );
+
   const parkingOptions = useMemo(() => {
     const fromConfig = PARKING_POINTS.map((p) => p.name);
     const live = new Set<string>();
-    for (const t of trucks) {
+    for (const t of displayTrucks) {
       if (t.parkingPoint) live.add(t.parkingPoint);
       if (t.lastPark) live.add(t.lastPark);
     }
     const extras = [...live].filter((n) => !fromConfig.includes(n)).sort();
     return [...fromConfig, ...extras];
-  }, [trucks]);
+  }, [displayTrucks]);
 
   const parkingCounts = useMemo(() => {
     const c: Record<string, number> = {};
     for (const name of parkingOptions) c[name] = 0;
-    for (const t of trucks) {
+    for (const t of displayTrucks) {
       if (t.status !== "PARK") continue;
       const key = t.parkingPoint || t.lastPark;
       if (!key) continue;
       c[key] = (c[key] ?? 0) + 1;
     }
     return c;
-  }, [trucks, parkingOptions]);
+  }, [displayTrucks, parkingOptions]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return trucks.filter((t) => {
+    return displayTrucks.filter((t) => {
       if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
       if (productFilter !== "ALL" && t.productLine !== productFilter)
         return false;
@@ -289,20 +300,9 @@ export function FleetProvider({ children }: { children: ReactNode }) {
         t.productLine.toLowerCase().includes(q)
       );
     });
-  }, [trucks, query, statusFilter, productFilter, parkingFilter]);
+  }, [displayTrucks, query, statusFilter, productFilter, parkingFilter]);
 
   const counts = useMemo(() => {
-    if (data?.statusCounts) {
-      return {
-        PARK: data.statusCounts.PARK ?? 0,
-        LOADING: data.statusCounts.LOADING ?? 0,
-        LOADED: data.statusCounts.LOADED ?? 0,
-        AT_FACTORY: data.statusCounts.AT_FACTORY ?? 0,
-        EMPTY: data.statusCounts.EMPTY ?? 0,
-        ON_ROAD: data.statusCounts.ON_ROAD ?? 0,
-        OFFLINE: data.statusCounts.OFFLINE ?? 0,
-      };
-    }
     const c: Record<string, number> = {
       PARK: 0,
       LOADING: 0,
@@ -312,21 +312,21 @@ export function FleetProvider({ children }: { children: ReactNode }) {
       ON_ROAD: 0,
       OFFLINE: 0,
     };
-    for (const t of trucks) {
+    for (const t of displayTrucks) {
       if (c[t.status] != null) c[t.status] += 1;
       else c.ON_ROAD += 1;
     }
     return c;
-  }, [trucks, data?.statusCounts]);
+  }, [displayTrucks]);
 
   const selected = useMemo(() => {
     if (!selectedImei) return null;
     return (
-      trucks.find((t) => t.imei === selectedImei) ??
+      displayTrucks.find((t) => t.imei === selectedImei) ??
       filtered.find((t) => t.imei === selectedImei) ??
       null
     );
-  }, [trucks, filtered, selectedImei]);
+  }, [displayTrucks, filtered, selectedImei]);
 
   const selectTruck = useCallback((imei: string) => {
     setSelectedImei(imei);
@@ -345,7 +345,7 @@ export function FleetProvider({ children }: { children: ReactNode }) {
   const value: FleetContextValue = {
     data,
     loading,
-    trucks,
+    trucks: displayTrucks,
     filtered,
     counts,
     selectedImei,

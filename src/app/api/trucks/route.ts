@@ -15,14 +15,77 @@ export const maxDuration = 60;
 
 export type { TruckSnapshot, FleetSnapshot };
 
+/**
+ * EMPTY is only valid after leaving a factory. Remap legacy cached rows so the
+ * UI does not show a huge Empty count for ordinary on-road trucks.
+ */
+function healLegacyEmpty(snapshot: FleetSnapshot): FleetSnapshot {
+  let changed = false;
+  const trucks = snapshot.trucks.map((t) => {
+    if (t.status === "EMPTY" && !t.lastFactory) {
+      changed = true;
+      return { ...t, status: "ON_ROAD" as const, cargo: "EMPTY" as const };
+    }
+    return t;
+  });
+  if (!changed) {
+    // Still ensure statusCounts includes ON_ROAD key for older snapshots.
+    if (snapshot.statusCounts && snapshot.statusCounts.ON_ROAD == null) {
+      return {
+        ...snapshot,
+        statusCounts: {
+          PARK: 0,
+          LOADING: 0,
+          LOADED: 0,
+          AT_FACTORY: 0,
+          EMPTY: 0,
+          ON_ROAD: 0,
+          OFFLINE: 0,
+          ...snapshot.statusCounts,
+        },
+      };
+    }
+    return snapshot;
+  }
+
+  const statusCounts = {
+    PARK: 0,
+    LOADING: 0,
+    LOADED: 0,
+    AT_FACTORY: 0,
+    EMPTY: 0,
+    ON_ROAD: 0,
+    OFFLINE: 0,
+  };
+  for (const t of trucks) {
+    if (t.status in statusCounts) {
+      statusCounts[t.status as keyof typeof statusCounts] += 1;
+    }
+  }
+  return {
+    ...snapshot,
+    trucks,
+    statusCounts,
+    statusCountTotal:
+      statusCounts.PARK +
+      statusCounts.LOADING +
+      statusCounts.LOADED +
+      statusCounts.AT_FACTORY +
+      statusCounts.EMPTY +
+      statusCounts.ON_ROAD +
+      statusCounts.OFFLINE,
+  };
+}
+
 function filterSnapshot(
   snapshot: FleetSnapshot,
   imeiFilter: string | null,
 ): FleetSnapshot {
-  if (!imeiFilter) return snapshot;
-  const trucks = snapshot.trucks.filter((t) => t.imei === imeiFilter);
+  const healed = healLegacyEmpty(snapshot);
+  if (!imeiFilter) return healed;
+  const trucks = healed.trucks.filter((t) => t.imei === imeiFilter);
   return {
-    ...snapshot,
+    ...healed,
     trucks,
     truckCount: trucks.length,
     loadingPoints: [],
