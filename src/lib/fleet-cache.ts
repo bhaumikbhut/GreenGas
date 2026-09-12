@@ -8,7 +8,7 @@ export const FLEET_SNAPSHOT_KEY = "green-gas:fleet-snapshot";
 export const FLEET_REFRESH_LOCK_KEY = "green-gas:fleet-refresh-lock";
 
 /** Serve cache as fresh under this age; older → return stale + background refresh. */
-export const FLEET_FRESH_SEC = Number(process.env.FLEET_CACHE_FRESH_SEC || 60);
+export const FLEET_FRESH_SEC = Number(process.env.FLEET_CACHE_FRESH_SEC || 120);
 
 const FILE = () => path.join(dataDir(), "fleet-snapshot.json");
 

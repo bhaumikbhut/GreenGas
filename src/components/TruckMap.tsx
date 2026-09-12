@@ -26,11 +26,11 @@ type Props = {
 
 function statusColor(status: string): string {
   if (status === "PARK") return "#f97316"; // orange
-  if (status === "LOADING") return "#dc2626"; // red
-  if (status === "LOADED") return "#14532d"; // dark green
-  if (status === "AT_FACTORY") return "#0d9488"; // teal
+  if (status === "LOADING") return "#EB5B3C"; // Groww-style market red
+  if (status === "LOADED") return "#00B386"; // Groww-style market green
+  if (status === "AT_FACTORY") return "#2dd4bf"; // teal
   if (status === "EMPTY") return "#eab308"; // yellow
-  if (status === "OFFLINE") return "#6b7280"; // gray
+  if (status === "OFFLINE") return "#9ca3af"; // gray
   return "#1d4f91";
 }
 
@@ -42,10 +42,8 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function plateTextColor(status: string): string {
-  // Yellow / orange need dark text; everything else uses white.
-  if (status === "EMPTY" || status === "PARK") return "#1c1917";
-  return "#ffffff";
+function plateTextColor(_status: string): string {
+  return "#000000";
 }
 
 function plateLabelHtml(plate: string, status: string): string {

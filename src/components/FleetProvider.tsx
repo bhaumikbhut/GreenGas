@@ -56,57 +56,57 @@ export const STATUS_META: Record<
 > = {
   PARK: {
     label: "Park",
-    chip: "bg-[#9a3412] text-white",
-    tile: "bg-[#f97316] text-[#1c1917]",
-    bar: "bg-[#9a3412]",
+    chip: "bg-black/15 text-black",
+    tile: "bg-[#f97316] text-black",
+    bar: "bg-black/40",
     card: "border-[#ea580c] bg-[#f97316]",
-    title: "text-[#1c1917]",
-    muted: "text-[#1c1917]/85",
+    title: "text-black",
+    muted: "text-black/80",
   },
   LOADING: {
     label: "Loading",
-    chip: "bg-black/30 text-white",
-    tile: "bg-[#dc2626] text-white",
-    bar: "bg-white/80",
-    card: "border-[#b91c1c] bg-[#dc2626]",
-    title: "text-white",
-    muted: "text-white/90",
+    chip: "bg-black/15 text-black",
+    tile: "bg-[#EB5B3C] text-black",
+    bar: "bg-black/40",
+    card: "border-[#d94a2f] bg-[#EB5B3C]",
+    title: "text-black",
+    muted: "text-black/80",
   },
   LOADED: {
     label: "Loaded",
-    chip: "bg-black/30 text-white",
-    tile: "bg-[#166534] text-white",
-    bar: "bg-white/80",
-    card: "border-[#14532d] bg-[#166534]",
-    title: "text-white",
-    muted: "text-white/90",
+    chip: "bg-black/15 text-black",
+    tile: "bg-[#00B386] text-black",
+    bar: "bg-black/40",
+    card: "border-[#009970] bg-[#00B386]",
+    title: "text-black",
+    muted: "text-black/80",
   },
   AT_FACTORY: {
     label: "Factory",
-    chip: "bg-[#0f766e] text-white",
-    tile: "bg-[#0d9488] text-white",
-    bar: "bg-[#0f766e]",
-    card: "border-[#0f766e] bg-[#0d9488]",
-    title: "text-white",
-    muted: "text-white/90",
+    chip: "bg-black/15 text-black",
+    tile: "bg-[#2dd4bf] text-black",
+    bar: "bg-black/40",
+    card: "border-[#14b8a6] bg-[#2dd4bf]",
+    title: "text-black",
+    muted: "text-black/80",
   },
   EMPTY: {
     label: "Empty",
-    chip: "bg-[#854d0e] text-white",
-    tile: "bg-[#eab308] text-[#1c1917]",
-    bar: "bg-[#854d0e]",
+    chip: "bg-black/15 text-black",
+    tile: "bg-[#eab308] text-black",
+    bar: "bg-black/40",
     card: "border-[#ca8a04] bg-[#eab308]",
-    title: "text-[#1c1917]",
-    muted: "text-[#1c1917]/85",
+    title: "text-black",
+    muted: "text-black/80",
   },
   OFFLINE: {
     label: "Offline",
-    chip: "bg-black/30 text-white",
-    tile: "bg-[#4b5563] text-white",
-    bar: "bg-white/80",
-    card: "border-[#374151] bg-[#4b5563]",
-    title: "text-white",
-    muted: "text-white/90",
+    chip: "bg-black/15 text-black",
+    tile: "bg-[#9ca3af] text-black",
+    bar: "bg-black/40",
+    card: "border-[#6b7280] bg-[#9ca3af]",
+    title: "text-black",
+    muted: "text-black/80",
   },
 };
 
@@ -176,7 +176,12 @@ export function FleetProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/trucks", { cache: "no-store" });
+      let res = await fetch("/api/trucks", { cache: "no-store" });
+      // Cold start can race the refresh lock — retry once.
+      if (res.status === 503) {
+        await new Promise((r) => setTimeout(r, 2000));
+        res = await fetch("/api/trucks", { cache: "no-store" });
+      }
       const json = (await res.json()) as FleetApiResponse;
       setData(json);
     } catch (err) {
@@ -211,13 +216,14 @@ export function FleetProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refresh();
-    const fast = setInterval(() => void refresh(), 30000);
-    const live = setInterval(() => void refreshLive(), 60000);
+    const fast = setInterval(() => void refresh(), 60000);
+    const live = setInterval(() => void refreshLive(), 180000);
     const onVisible = () => {
       if (document.visibilityState === "visible") void refreshLive();
     };
     document.addEventListener("visibilitychange", onVisible);
-    const boot = setTimeout(() => void refreshLive(), 2000);
+    // Don't stampede ProTrack on boot — wait until cache exists.
+    const boot = setTimeout(() => void refreshLive(), 90000);
     return () => {
       clearInterval(fast);
       clearInterval(live);

@@ -33,8 +33,8 @@ AT_FACTORY → leave factory                → EMPTY
 - WhatsApp on transitions + live track link (`/track/<imei>`)  
 - Factory yards: Google Maps pins in `src/lib/factory-points.ts` (per-plant radius from nearest neighbor)  
 - Set `APP_PUBLIC_URL` for WhatsApp live-track links  
-- Production status memory: **Upstash Redis** (`KV_REST_API_URL` / `KV_REST_API_TOKEN`)
-- Fleet positions: cached in Redis. While the dashboard is open, stale snapshots trigger a **background ProTrack refresh** (no wait on the browser). On Hobby, Vercel Cron warms cache once daily; upgrade to Pro for every-minute cron. `/api/trucks` reads the cache (fast). First cold load may still wait on ProTrack (~20–25s).
+- Production status memory: **Turso** (open-source libSQL/SQLite). Set `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` on Vercel.
+- Fleet positions: cached in Turso. UI polls ~every **60s**; live ProTrack ~every **3 min** while the tab is open. Hobby cron warms cache once daily.
 
 ## GPS source
 

@@ -30,6 +30,18 @@ function filterSnapshot(
   };
 }
 
+async function waitForCachedSnapshot(
+  attempts = 60,
+  delayMs = 500,
+): Promise<FleetSnapshot | null> {
+  for (let i = 0; i < attempts; i++) {
+    const cached = await readFleetSnapshot();
+    if (cached && cached.trucks.length > 0) return cached;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return null;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const imeiFilter = searchParams.get("imei")?.trim() || null;
@@ -42,7 +54,14 @@ export async function GET(request: Request) {
         filterSnapshot(withCacheMeta(result.snapshot, false), imeiFilter),
       );
     }
-    // Lock held — fall through to cache if present
+    // Lock held — serve cache (wait briefly if still warming).
+    const cachedLive =
+      (await readFleetSnapshot()) || (await waitForCachedSnapshot(40, 500));
+    if (cachedLive && cachedLive.trucks.length > 0) {
+      return NextResponse.json(
+        filterSnapshot(withCacheMeta(cachedLive, true), imeiFilter),
+      );
+    }
   }
 
   const cached = await readFleetSnapshot();
@@ -50,7 +69,6 @@ export async function GET(request: Request) {
   if (cached && cached.trucks.length > 0) {
     const fresh = isSnapshotFresh(cached);
     if (!fresh) {
-      // Return stale immediately; refresh in background after response.
       after(() => {
         void refreshFleetCache();
       });
@@ -68,7 +86,14 @@ export async function GET(request: Request) {
     );
   }
 
-  // Another refresh is running and we have no cache yet.
+  // Another refresh holds the lock — wait for its snapshot instead of 503.
+  const waited = await waitForCachedSnapshot(60, 500);
+  if (waited && waited.trucks.length > 0) {
+    return NextResponse.json(
+      filterSnapshot(withCacheMeta(waited, true), imeiFilter),
+    );
+  }
+
   return NextResponse.json(
     {
       ok: false,
@@ -78,7 +103,7 @@ export async function GET(request: Request) {
       loadingPoints: imeiFilter ? [] : LOADING_POINTS,
       factoryPoints: imeiFilter ? [] : FACTORY_POINTS,
       factoryCount: FACTORY_POINTS.length,
-      errors: ["Fleet refresh in progress — retry in a few seconds"],
+      errors: ["Fleet refresh timed out — retry"],
       cache: { hit: false, ageSec: null, refreshedAt: null },
     } satisfies Partial<FleetSnapshot>,
     { status: 503 },

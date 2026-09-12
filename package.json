@@ -9,7 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@upstash/redis": "^1.38.4",
+    "@libsql/client": "^0.18.0",
     "leaflet": "^1.9.4",
     "next": "15.5.25",
     "react": "19.1.0",
