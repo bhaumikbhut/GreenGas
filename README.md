@@ -64,3 +64,4 @@ Create an app in [Meta for Developers](https://developers.facebook.com/), add Wh
 - Health: `GET /api/health`  
 - Warm cache: `GET /api/cron/refresh-fleet` (set `CRON_SECRET`; Vercel Cron sends `Authorization: Bearer …`)  
 - Optional force live pull: `GET /api/trucks?live=1`  
+# GreenGas
