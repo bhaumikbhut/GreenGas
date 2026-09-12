@@ -10,12 +10,20 @@ import {
  *   EMPTY → enter parking      → PARK
  *   PARK  → leave parking      → EMPTY
  *   EMPTY/PARK → enter loading → LOADING
- *   LOADING → leave loading    → LOADED  (filled, heading to factory)
+ *   LOADING → leave loading    → LOADED  (filled) only after min dwell
  *   LOADED → enter factory     → AT_FACTORY
  *   AT_FACTORY → leave factory → EMPTY
+ *   LOADED → re-enter loading  → LOADING (next trip; treated as empty return)
  *
+ * Short visits to a loading pin (drive-through) do NOT become LOADED —
+ * they fall back to PARK (if in parking) or EMPTY.
  * Loading points take priority over parking when both apply.
  */
+
+/** Minimum time inside a loading bay before leave counts as filled. */
+export const MIN_LOADING_DWELL_MS = Number(
+  process.env.MIN_LOADING_DWELL_MS || 3 * 60 * 1000,
+);
 export type AutoStatus =
   | "PARK"
   | "LOADING"
@@ -189,6 +197,11 @@ export function normalizeMemory(
   };
 }
 
+function loadingDwellOk(prev: TruckMemory, now: number): boolean {
+  if (prev.enteredAt == null) return false;
+  return now - prev.enteredAt >= MIN_LOADING_DWELL_MS;
+}
+
 export function nextStatus(params: {
   prev: TruckMemory | undefined;
   insideLoading: { point: LoadingPoint; distanceM: number } | null;
@@ -213,16 +226,102 @@ export function nextStatus(params: {
       ...prev,
       ...base,
       status: "OFFLINE",
-      outsideStreak: 0,
+      // Keep outsideStreak so leave-loading progress survives brief GPS drops.
     };
   }
 
-  // --- Filled truck: factory has priority; ignore port/parking until emptied ---
-  if (
+  const loadingIds = new Set(PORT_LOADING_POINTS.map((p) => p.id));
+  const parkingIds = new Set(PARKING_POINTS.map((p) => p.id));
+
+  // Trust status even if geofence id was lost / renamed in Redis.
+  const wasLoading =
+    prev.status === "LOADING" ||
+    (prev.geofenceKind === "loading" &&
+      prev.geofenceId != null &&
+      loadingIds.has(prev.geofenceId));
+  const wasPark =
+    prev.status === "PARK" ||
+    (prev.geofenceKind === "parking" &&
+      prev.geofenceId != null &&
+      parkingIds.has(prev.geofenceId));
+
+  const isFilled =
     prev.cargo === "LOADED" ||
     prev.status === "LOADED" ||
-    prev.status === "AT_FACTORY"
-  ) {
+    prev.status === "AT_FACTORY";
+
+  // --- Filled truck ---
+  if (isFilled) {
+    // Heal false LOADED (no load source): sitting in parking → PARK.
+    if (
+      !prev.lastLoadedFrom &&
+      prev.status === "LOADED" &&
+      params.insideParking &&
+      !params.insideLoading &&
+      !params.insideFactory
+    ) {
+      return {
+        ...base,
+        status: "PARK",
+        geofenceId: params.insideParking.point.id,
+        geofenceKind: "parking",
+        enteredAt: now,
+        outsideStreak: 0,
+        cargo: "EMPTY",
+        lastPark: params.insideParking.point.name,
+        lastLoadedFrom: null,
+      };
+    }
+
+    // Heal false LOADED on the road with no load source → EMPTY.
+    if (
+      !prev.lastLoadedFrom &&
+      prev.status === "LOADED" &&
+      !params.insideLoading &&
+      !params.insideParking &&
+      !params.insideFactory
+    ) {
+      return {
+        ...base,
+        status: "EMPTY",
+        geofenceId: null,
+        geofenceKind: null,
+        enteredAt: null,
+        outsideStreak: 0,
+        cargo: "EMPTY",
+        lastLoadedFrom: null,
+      };
+    }
+
+    // Next trip at a *different* loading bay → start LOADING again.
+    // Same bay while still LOADED = still at origin port (jitter / waiting) — keep LOADED.
+    if (params.insideLoading) {
+      const sameBay =
+        prev.lastLoadedFrom != null &&
+        prev.lastLoadedFrom === params.insideLoading.point.name;
+      if (sameBay) {
+        return {
+          ...base,
+          status: "LOADED",
+          geofenceId: null,
+          geofenceKind: null,
+          enteredAt: null,
+          outsideStreak: 0,
+          cargo: "LOADED",
+        };
+      }
+      return {
+        ...base,
+        status: "LOADING",
+        geofenceId: params.insideLoading.point.id,
+        geofenceKind: "loading",
+        enteredAt: now,
+        outsideStreak: 0,
+        cargo: "EMPTY",
+        lastLoadedFrom: null,
+      };
+    }
+
     if (params.insideFactory) {
       return {
         ...base,
@@ -244,9 +343,9 @@ export function nextStatus(params: {
       (prev.geofenceKind === "factory" &&
         prev.geofenceId != null &&
         isKnownFactoryId(prev.geofenceId));
-    const outsideStreak = wasAtFactory ? prev.outsideStreak + 1 : 0;
+    const outsideFactoryStreak = wasAtFactory ? prev.outsideStreak + 1 : 0;
 
-    if (wasAtFactory && outsideStreak >= 2) {
+    if (wasAtFactory && outsideFactoryStreak >= 2) {
       return {
         ...base,
         status: "EMPTY",
@@ -265,10 +364,11 @@ export function nextStatus(params: {
         ...base,
         status: "AT_FACTORY",
         cargo: "LOADED",
-        outsideStreak,
+        outsideStreak: outsideFactoryStreak,
       };
     }
 
+    // Filled (on road or in port parking after a real load).
     return {
       ...base,
       status: "LOADED",
@@ -298,24 +398,49 @@ export function nextStatus(params: {
     };
   }
 
-  const loadingIds = new Set(PORT_LOADING_POINTS.map((p) => p.id));
-  const wasLoading =
-    (prev.status === "LOADING" || prev.geofenceKind === "loading") &&
-    prev.geofenceId != null &&
-    loadingIds.has(prev.geofenceId);
   const leaveLoadingStreak = wasLoading ? prev.outsideStreak + 1 : 0;
 
   if (wasLoading && leaveLoadingStreak >= 2) {
     const fromPoint = PORT_LOADING_POINTS.find((p) => p.id === prev.geofenceId);
+    const loadedFrom =
+      fromPoint?.name ?? prev.lastLoadedFrom ?? null;
+
+    // Real fill: stayed in bay long enough.
+    if (loadingDwellOk(prev, now)) {
+      return {
+        ...base,
+        status: "LOADED",
+        geofenceId: null,
+        geofenceKind: null,
+        enteredAt: null,
+        outsideStreak: 0,
+        cargo: "LOADED",
+        lastLoadedFrom: loadedFrom,
+      };
+    }
+
+    // Drive-through / brief visit — not LOADED.
+    if (params.insideParking) {
+      return {
+        ...base,
+        status: "PARK",
+        geofenceId: params.insideParking.point.id,
+        geofenceKind: "parking",
+        enteredAt: now,
+        outsideStreak: 0,
+        cargo: "EMPTY",
+        lastPark: params.insideParking.point.name,
+      };
+    }
+
     return {
       ...base,
-      status: "LOADED",
+      status: "EMPTY",
       geofenceId: null,
       geofenceKind: null,
       enteredAt: null,
       outsideStreak: 0,
-      cargo: "LOADED",
-      lastLoadedFrom: fromPoint?.name ?? prev.lastLoadedFrom ?? null,
+      cargo: "EMPTY",
     };
   }
 
@@ -348,11 +473,6 @@ export function nextStatus(params: {
     };
   }
 
-  const parkingIds = new Set(PARKING_POINTS.map((p) => p.id));
-  const wasPark =
-    (prev.status === "PARK" || prev.geofenceKind === "parking") &&
-    prev.geofenceId != null &&
-    parkingIds.has(prev.geofenceId);
   const leaveParkStreak = wasPark ? prev.outsideStreak + 1 : 0;
 
   if (wasPark && leaveParkStreak >= 2) {

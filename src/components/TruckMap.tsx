@@ -25,95 +25,80 @@ type Props = {
 };
 
 function statusColor(status: string): string {
-  if (status === "PARK") return "#2563eb"; // blue
-  if (status === "LOADING") return "#ea580c"; // orange
-  if (status === "LOADED") return "#16a34a"; // green
+  if (status === "PARK") return "#f97316"; // orange
+  if (status === "LOADING") return "#dc2626"; // red
+  if (status === "LOADED") return "#14532d"; // dark green
   if (status === "AT_FACTORY") return "#0d9488"; // teal
   if (status === "EMPTY") return "#eab308"; // yellow
-  if (status === "OFFLINE") return "#6b7280";
+  if (status === "OFFLINE") return "#6b7280"; // gray
   return "#1d4f91";
 }
 
-/** Fleet overview: status pin + clear truck glyph (OSM/Temaki style). */
-function fleetPinIcon(status: string, selected = false, course = 0) {
-  const color = statusColor(status);
-  const w = selected ? 40 : 34;
-  const h = selected ? 52 : 44;
-  const heading = Number.isFinite(course) ? course : 0;
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
-  const truckPath =
-    "M2.75 9.75C2 9.75 1.5 10.25 1.5 11C1.5 11.75 2 12.25 2.75 12.25C3.5 12.25 4 11.75 4 11C4 10.25 3.5 9.75 2.75 9.75zM11.75 9.75C11 9.75 10.5 10.25 10.5 11C10.5 11.75 11 12.25 11.75 12.25C12.5 12.25 13 11.75 13 11C13 10.25 12.5 9.75 11.75 9.75zM14.5 3C14.5 3 5.5 3 5.5 3C4.91 3 5 3.5 5 3.5C5 3.5 5 7 5 7L4.25 7L4.25 4.5C4.25 4 3.75 4 3.75 4C3.75 4 2 4 2 4C0.5 4 0.5 6 0.5 7C0.5 7 0 7 0 7.5C0 7.5 0 11 0 11L1 11C1 9.75 1.75 9.25 2.75 9.25C3.75 9.25 4.5 9.75 4.5 11C4.5 11 10 11 10 11C10 9.75 10.75 9.25 11.75 9.25C12.75 9.25 13.5 9.75 13.5 11C13.5 11 15 11 15 11C15 11 15 3.5 15 3.5C15 3.5 15 3 14.5 3zM3 5L3 7C3 7 1.5 7 1.5 7C1.5 6 1.5 5 2 5C2 5 3 5 3 5z";
+function plateLabelHtml(plate: string, color: string): string {
+  const text = escapeHtml(plate || "—");
+  return (
+    `<div class="gg-plate-label" style="` +
+    `margin-top:2px;max-width:110px;padding:2px 5px;border-radius:4px;` +
+    `background:rgba(15,15,15,.82);color:#fff;border:1px solid ${color};` +
+    `font:700 10px/1.2 ui-sans-serif,system-ui,sans-serif;` +
+    `letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;` +
+    `text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.35)` +
+    `">${text}</div>`
+  );
+}
+
+/** Status-colored dot + number plate. */
+function truckMarkerIcon(
+  status: string,
+  plate: string,
+  selected = false,
+  _course = 0,
+  _speed = 0,
+) {
+  const color = statusColor(status);
+  const dot = selected ? 16 : 12;
+  const boxW = 100;
+  const boxH = dot + 22;
+  const ring = selected
+    ? `<circle cx="12" cy="12" r="10" fill="none" stroke="${color}" stroke-width="2" opacity=".4"/>`
+    : "";
 
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 40 52" overflow="visible">` +
-    `<path d="M20 2C11.2 2 4 9 4 17.6C4 28.5 20 48 20 48S36 28.5 36 17.6C36 9 28.8 2 20 2Z" fill="${color}" stroke="#fff" stroke-width="2"/>` +
-    `<circle cx="20" cy="17" r="10.5" fill="rgba(0,0,0,.16)"/>` +
-    `<g transform="translate(8.2 10.2) scale(1.55)" fill="#fff"><path d="${truckPath}"/></g>` +
-    `<g transform="rotate(${heading} 20 48)">` +
-    `<path d="M20 42 L24.5 49.5 L20 47.2 L15.5 49.5 Z" fill="${color}" stroke="#fff" stroke-width="1" stroke-linejoin="round"/>` +
-    `</g>` +
-    (selected
-      ? `<circle cx="20" cy="17" r="18" fill="none" stroke="${color}" stroke-width="2" opacity=".35"/>`
-      : "") +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${dot + 4}" height="${dot + 4}" viewBox="0 0 24 24" overflow="visible">` +
+    ring +
+    `<circle cx="12" cy="12" r="${selected ? 7 : 6}" fill="${color}" stroke="#fff" stroke-width="2"/>` +
     `</svg>`;
 
   return L.divIcon({
     className: "gg-truck-marker",
-    html: `<div class="gg-truck-pin" style="width:${w}px;height:${h}px;line-height:0;filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))">${svg}</div>`,
-    iconSize: [w, h],
-    iconAnchor: [w / 2, h - 2],
-    popupAnchor: [0, -(h - 8)],
-  });
-}
-
-/**
- * Live tracking: Uber-style top-down tanker that rotates with GPS course.
- * Larger + motion pulse when moving — reads clearly as a live vehicle.
- */
-function liveVehicleIcon(status: string, course = 0, speed = 0) {
-  const color = statusColor(status);
-  const moving = speed > 3;
-  const size = 56;
-  const heading = Number.isFinite(course) ? course : 0;
-
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 64 64" overflow="visible">` +
-    `<g transform="rotate(${heading} 32 32)">` +
-    (moving
-      ? `<circle cx="32" cy="32" r="28" fill="${color}" opacity=".12"/><circle cx="32" cy="32" r="22" fill="none" stroke="${color}" stroke-width="2" opacity=".35"/>`
-      : `<circle cx="32" cy="32" r="24" fill="${color}" opacity=".1"/>`) +
-    // body (top-down cab + tank)
-    `<ellipse cx="32" cy="36" rx="9" ry="22" fill="rgba(0,0,0,.18)"/>` +
-    `<path d="M23 18 C23 10 27 5 32 5 C37 5 41 10 41 18 L41 48 C41 54 37 58 32 58 C27 58 23 54 23 48 Z" fill="#fff"/>` +
-    `<path d="M24.5 18.5 C24.5 11.5 28 7.5 32 7.5 C36 7.5 39.5 11.5 39.5 18.5 L39.5 47.5 C39.5 52.5 36 55.5 32 55.5 C28 55.5 24.5 52.5 24.5 47.5 Z" fill="${color}"/>` +
-    // windshield (direction)
-    `<path d="M26.5 15 C28.5 10.5 35.5 10.5 37.5 15 L36 21 C34 18.8 30 18.8 28 21 Z" fill="rgba(255,255,255,.85)"/>` +
-    // cab/tank split
-    `<rect x="26" y="24" width="12" height="2" rx="1" fill="rgba(255,255,255,.35)"/>` +
-    // center highlight
-    `<rect x="29.5" y="28" width="5" height="20" rx="2.5" fill="rgba(255,255,255,.15)"/>` +
-    `</g></svg>`;
-
-  return L.divIcon({
-    className: "gg-truck-marker",
-    html: `<div class="gg-truck-pin" style="width:${size}px;height:${size}px;line-height:0;filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))">${svg}</div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-    popupAnchor: [0, -size / 2],
+    html:
+      `<div class="gg-truck-pin" style="width:${boxW}px;display:flex;flex-direction:column;align-items:center;line-height:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))">` +
+      svg +
+      plateLabelHtml(plate, color) +
+      `</div>`,
+    iconSize: [boxW, boxH],
+    iconAnchor: [boxW / 2, (dot + 4) / 2],
+    popupAnchor: [0, -((dot + 4) / 2)],
   });
 }
 
 function truckIcon(
-  mode: "fleet" | "live",
+  _mode: "fleet" | "live",
   status: string,
+  plate: string,
   selected: boolean,
   course: number,
   speed: number,
 ) {
-  if (mode === "live" || selected) {
-    return liveVehicleIcon(status, course, speed);
-  }
-  return fleetPinIcon(status, false, course);
+  return truckMarkerIcon(status, plate, selected, course, speed);
 }
 
 function FitBounds({
@@ -391,6 +376,7 @@ export default function TruckMap({
             icon={truckIcon(
               mode,
               t.status,
+              t.plate,
               t.imei === selectedImei,
               t.course,
               t.speed,

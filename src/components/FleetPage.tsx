@@ -63,7 +63,7 @@ export default function FleetPage() {
                       return next;
                     })
                   }
-                  className={`rounded-lg px-0.5 py-1.5 text-center transition lg:py-1 ${meta.chip} ${
+                  className={`rounded-lg px-0.5 py-1.5 text-center transition lg:py-1 ${meta.tile} ${
                     on
                       ? "ring-2 ring-[var(--gg-forest)] ring-offset-1"
                       : "opacity-90"
@@ -191,11 +191,11 @@ export default function FleetPage() {
                           {statusBadge(t.status)}
                         </span>
                       </span>
-                      <span className="mt-0.5 block truncate text-[11px] text-[var(--gg-muted)]">
+                      <span className={`mt-0.5 block truncate text-[11px] ${meta.muted}`}>
                         {t.productLine} · {t.speed} km/h
                       </span>
                       {detail ? (
-                        <span className="mt-0.5 block truncate text-[11px] text-[var(--gg-ink)]/70">
+                        <span className={`mt-0.5 block truncate text-[11px] ${meta.muted}`}>
                           {detail}
                         </span>
                       ) : null}

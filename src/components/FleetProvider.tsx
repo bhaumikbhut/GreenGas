@@ -40,43 +40,65 @@ export type FleetApiResponse = {
 
 export const STATUS_META: Record<
   string,
-  { label: string; chip: string; bar: string; card: string }
+  {
+    label: string;
+    /** Badge on fleet card */
+    chip: string;
+    /** Status filter tile in toolbar */
+    tile: string;
+    bar: string;
+    card: string;
+    /** Secondary line color on the card */
+    muted: string;
+  }
 > = {
   PARK: {
     label: "Park",
-    chip: "bg-[#dbeafe] text-[#1e40af]",
-    bar: "bg-[#2563eb]",
-    card: "border-[#93c5fd] bg-[#eff6ff]",
+    chip: "bg-[#c2410c] text-white",
+    tile: "bg-[#f97316] text-white",
+    bar: "bg-[#ea580c]",
+    card: "border-[#ea580c] bg-[#f97316] text-white",
+    muted: "text-white/80",
   },
   LOADING: {
     label: "Loading",
-    chip: "bg-[#ffedd5] text-[#c2410c]",
-    bar: "bg-[#ea580c]",
-    card: "border-[#fdba74] bg-[#fff7ed]",
+    chip: "bg-white/20 text-white",
+    tile: "bg-[#dc2626] text-white",
+    bar: "bg-[#fca5a5]",
+    card: "border-[#b91c1c] bg-[#dc2626] text-white",
+    muted: "text-white/80",
   },
   LOADED: {
     label: "Loaded",
-    chip: "bg-[#dcfce7] text-[#166534]",
-    bar: "bg-[#16a34a]",
-    card: "border-[#86efac] bg-[#f0fdf4]",
+    chip: "bg-white/20 text-white",
+    tile: "bg-[#14532d] text-white",
+    bar: "bg-[#86efac]",
+    card: "border-[#14532d] bg-[#14532d] text-white",
+    muted: "text-white/75",
   },
   AT_FACTORY: {
     label: "Factory",
     chip: "bg-[#ccfbf1] text-[#0f766e]",
+    tile: "bg-[#ccfbf1] text-[#0f766e]",
     bar: "bg-[#0d9488]",
     card: "border-[#5eead4] bg-[#f0fdfa]",
+    muted: "text-[var(--gg-muted)]",
   },
   EMPTY: {
     label: "Empty",
-    chip: "bg-[#fef9c3] text-[#a16207]",
-    bar: "bg-[#eab308]",
-    card: "border-[#fde047] bg-[#fefce8]",
+    chip: "bg-[#a16207] text-white",
+    tile: "bg-[#eab308] text-[#422006]",
+    bar: "bg-[#ca8a04]",
+    card: "border-[#ca8a04] bg-[#eab308] text-[#422006]",
+    muted: "text-[#422006]/80",
   },
   OFFLINE: {
     label: "Offline",
-    chip: "bg-[#eef0f2] text-[#4b5563]",
-    bar: "bg-[#6b7280]",
-    card: "border-[#d1d5db] bg-[#f9fafb]",
+    chip: "bg-white/20 text-white",
+    tile: "bg-[#6b7280] text-white",
+    bar: "bg-[#d1d5db]",
+    card: "border-[#4b5563] bg-[#6b7280] text-white",
+    muted: "text-white/80",
   },
 };
 
