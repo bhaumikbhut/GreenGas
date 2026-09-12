@@ -38,8 +38,8 @@ async function main() {
 
   const onlyRaw = flag("only");
   const result = await healFleetFromPlayback({
-    hours: Number(flag("hours") || 36),
-    concurrency: Number(flag("concurrency") || 2),
+    hours: Number(flag("hours") || 48),
+    concurrency: Number(flag("concurrency") || 1),
     maxTrucks: flag("max") ? Number(flag("max")) : undefined,
     onlyStatuses: onlyRaw
       ? (onlyRaw.split(",").map((s) => s.trim().toUpperCase()) as Array<
@@ -56,7 +56,28 @@ async function main() {
     pauseMs: flag("pause") ? Number(flag("pause")) : 600,
   });
 
-  console.log(JSON.stringify(result, null, 2));
+  const { readFleetSnapshot } = await import("../src/lib/fleet-cache");
+  const snap = await readFleetSnapshot();
+  const byProduct: Record<string, Record<string, number>> = {
+    LPG: {},
+    PROPANE: {},
+  };
+  for (const t of snap?.trucks || []) {
+    const pl = t.productLine === "LPG" ? "LPG" : "PROPANE";
+    byProduct[pl][t.status] = (byProduct[pl][t.status] || 0) + 1;
+  }
+
+  console.log(
+    JSON.stringify(
+      {
+        ...result,
+        propane: byProduct.PROPANE,
+        lpg: byProduct.LPG,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 main().catch((err) => {

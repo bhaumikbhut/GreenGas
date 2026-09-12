@@ -18,11 +18,10 @@ import {
 import { getConfiguredAccounts, type ProtrackAccount } from "@/lib/protrack";
 import { readTruckStore, writeTruckStore } from "@/lib/status-store";
 import {
-  completeTrip,
-  markTripArrived,
-  openTrip,
   listTrips,
   fillUnknownLoadedFrom,
+  reconcileTripsFromFleet,
+  scrubUnknownFactoryFromTrips,
   TRIPS_KEY,
 } from "@/lib/trips";
 import { getRedis } from "@/lib/kv";
@@ -85,6 +84,250 @@ export function replayPlaybackPoints(
   return { memory, transitions, pointsUsed: points.length };
 }
 
+function toSec(gpstime: number): number {
+  return gpstime > 1e12 ? Math.floor(gpstime / 1000) : Math.floor(gpstime);
+}
+
+type PinHit = { id: string; name: string; port?: string | null; atSec: number };
+
+/** Last enter/leave of known loading / parking / factory pins in a trail. */
+export function extractPinEvents(
+  points: PortalPlaybackPoint[],
+  radiusM = 500,
+): {
+  lastLeaveLoad: PinHit | null;
+  lastEnterLoad: PinHit | null;
+  lastLeaveFactory: PinHit | null;
+  lastEnterFactory: PinHit | null;
+  lastLeavePark: PinHit | null;
+  lastEnterPark: PinHit | null;
+  stillInLoad: PinHit | null;
+  stillInFactory: PinHit | null;
+  stillInPark: PinHit | null;
+} {
+  let inLoad: PinHit | null = null;
+  let inFac: PinHit | null = null;
+  let inPark: PinHit | null = null;
+  let lastLeaveLoad: PinHit | null = null;
+  let lastEnterLoad: PinHit | null = null;
+  let lastLeaveFactory: PinHit | null = null;
+  let lastEnterFactory: PinHit | null = null;
+  let lastLeavePark: PinHit | null = null;
+  let lastEnterPark: PinHit | null = null;
+
+  for (const p of points) {
+    const atSec = toSec(p.gpstime);
+    const L = findNearestLoadingPoint(p.latitude, p.longitude);
+    const P = findNearestParkingPoint(p.latitude, p.longitude);
+    const F = findNearestFactoryPoint(p.latitude, p.longitude, radiusM);
+
+    if (L) {
+      if (!inLoad || inLoad.id !== L.point.id) {
+        inLoad = {
+          id: L.point.id,
+          name: L.point.name,
+          port: L.point.port,
+          atSec,
+        };
+        lastEnterLoad = inLoad;
+      }
+    } else if (inLoad) {
+      lastLeaveLoad = { ...inLoad, atSec };
+      inLoad = null;
+    }
+
+    if (F) {
+      if (!inFac || inFac.id !== F.point.id) {
+        inFac = {
+          id: F.point.id,
+          name: F.point.name,
+          atSec,
+        };
+        lastEnterFactory = inFac;
+      }
+    } else if (inFac) {
+      lastLeaveFactory = { ...inFac, atSec };
+      inFac = null;
+    }
+
+    if (P) {
+      if (!inPark || inPark.id !== P.point.id) {
+        inPark = {
+          id: P.point.id,
+          name: P.point.name,
+          port: P.point.port,
+          atSec,
+        };
+        lastEnterPark = inPark;
+      }
+    } else if (inPark) {
+      lastLeavePark = { ...inPark, atSec };
+      inPark = null;
+    }
+  }
+
+  return {
+    lastLeaveLoad,
+    lastEnterLoad,
+    lastLeaveFactory,
+    lastEnterFactory,
+    lastLeavePark,
+    lastEnterPark,
+    stillInLoad: inLoad,
+    stillInFactory: inFac,
+    stillInPark: inPark,
+  };
+}
+
+/**
+ * Cargo from history (last leave-loading vs last leave-factory),
+ * then current status from the live GPS pin.
+ */
+export function memoryFromLiveAndHistory(params: {
+  online: boolean;
+  lat: number | null;
+  lng: number | null;
+  points: PortalPlaybackPoint[];
+  radiusM?: number;
+  now?: number;
+}): TruckMemory {
+  const radiusM = params.radiusM ?? 500;
+  const now = params.now ?? Date.now();
+  const ev = extractPinEvents(params.points, radiusM);
+
+  const lastLoad = ev.lastLeaveLoad || ev.lastEnterLoad;
+  const lastFac = ev.lastLeaveFactory || ev.lastEnterFactory;
+  const lastPark = ev.lastEnterPark || ev.lastLeavePark;
+
+  // Filled if they left a loading bay OR left port parking (they always
+  // go park → load → filled) and have not left a factory since.
+  const lastPortLeaveAt = Math.max(
+    ev.lastLeaveLoad?.atSec ?? 0,
+    ev.lastLeavePark?.atSec ?? 0,
+  );
+  const filled =
+    lastPortLeaveAt > 0 &&
+    (!ev.lastLeaveFactory || lastPortLeaveAt >= ev.lastLeaveFactory.atSec);
+
+  const insideLoading =
+    params.lat != null && params.lng != null
+      ? findNearestLoadingPoint(params.lat, params.lng)
+      : null;
+  const insideParking =
+    params.lat != null && params.lng != null
+      ? findNearestParkingPoint(params.lat, params.lng)
+      : null;
+  const insideFactory =
+    params.lat != null && params.lng != null
+      ? findNearestFactoryPoint(params.lat, params.lng, radiusM)
+      : null;
+
+  const lastLoadedFrom =
+    lastLoad?.name ??
+    (lastPark?.port
+      ? PORT_LOADING_POINTS.find((p) => p.port === lastPark.port)?.name ?? null
+      : null);
+  const lastFactory = insideFactory?.point.name ?? lastFac?.name ?? null;
+  const lastParkName = insideParking?.point.name ?? lastPark?.name ?? null;
+
+  const base = {
+    lastNotifiedStatus: null as AutoStatus | null,
+    lastNotifiedAt: null as number | null,
+    lastLoadedFrom,
+    lastFactory,
+    lastPark: lastParkName,
+  };
+
+  if (!params.online) {
+    return {
+      ...base,
+      status: "OFFLINE",
+      geofenceId: null,
+      geofenceKind: null,
+      enteredAt: null,
+      outsideStreak: 0,
+      cargo: filled ? "LOADED" : "EMPTY",
+    };
+  }
+
+  // Live pin wins for where the truck is right now.
+  if (insideFactory) {
+    return {
+      ...base,
+      status: "AT_FACTORY",
+      geofenceId: insideFactory.point.id,
+      geofenceKind: "factory",
+      enteredAt: now,
+      outsideStreak: 0,
+      cargo: "LOADED",
+      lastFactory: insideFactory.point.name,
+    };
+  }
+
+  if (insideLoading) {
+    const sameBay =
+      filled &&
+      lastLoadedFrom != null &&
+      lastLoadedFrom === insideLoading.point.name;
+    if (sameBay) {
+      return {
+        ...base,
+        status: "LOADED",
+        geofenceId: null,
+        geofenceKind: null,
+        enteredAt: null,
+        outsideStreak: 0,
+        cargo: "LOADED",
+      };
+    }
+    return {
+      ...base,
+      status: "LOADING",
+      geofenceId: insideLoading.point.id,
+      geofenceKind: "loading",
+      enteredAt: now,
+      outsideStreak: 0,
+      cargo: "EMPTY",
+      lastLoadedFrom: null,
+    };
+  }
+
+  if (insideParking && !filled) {
+    return {
+      ...base,
+      status: "PARK",
+      geofenceId: insideParking.point.id,
+      geofenceKind: "parking",
+      enteredAt: now,
+      outsideStreak: 0,
+      cargo: "EMPTY",
+      lastPark: insideParking.point.name,
+    };
+  }
+
+  if (filled) {
+    return {
+      ...base,
+      status: "LOADED",
+      geofenceId: null,
+      geofenceKind: null,
+      enteredAt: null,
+      outsideStreak: 0,
+      cargo: "LOADED",
+    };
+  }
+
+  return {
+    ...base,
+    status: "ON_ROAD",
+    geofenceId: null,
+    geofenceKind: null,
+    enteredAt: null,
+    outsideStreak: 0,
+    cargo: "EMPTY",
+  };
+}
+
 function portForLoadedFrom(name: string | null | undefined): string | null {
   if (!name) return null;
   return PORT_LOADING_POINTS.find((p) => p.name === name)?.port ?? null;
@@ -130,9 +373,7 @@ function applyMemoryToTruck(
     truck.parkingPoint = P?.point.name ?? null;
     truck.factoryPoint =
       F?.point.name ??
-      (memory.status === "AT_FACTORY"
-        ? memory.lastFactory || "Unknown factory"
-        : null);
+      (memory.status === "AT_FACTORY" ? memory.lastFactory || null : null);
     truck.distanceM =
       Math.round(L?.distanceM ?? P?.distanceM ?? F?.distanceM ?? 0) || null;
   }
@@ -191,11 +432,11 @@ export async function healFleetFromPlayback(
   const end = Math.floor(Date.now() / 1000);
   const begin = end - hours * 3600;
 
-  let snap = await readFleetSnapshot();
+  const { refreshFleetLiveGps } = await import("@/lib/refresh-fleet");
+  const refreshed = await refreshFleetLiveGps();
+  let snap = refreshed.snapshot ?? (await readFleetSnapshot());
   if (!snap?.trucks?.length) {
-    const { refreshFleetLiveGps } = await import("@/lib/refresh-fleet");
-    const refreshed = await refreshFleetLiveGps();
-    snap = refreshed.snapshot ?? (await readFleetSnapshot());
+    snap = await readFleetSnapshot();
   }
   if (!snap?.trucks?.length) {
     throw new Error("No fleet snapshot — refresh live GPS first");
@@ -222,7 +463,7 @@ export async function healFleetFromPlayback(
     });
   }
 
-  let trucks = snap.trucks.filter((t) => t.online !== false);
+  let trucks = snap.trucks.slice();
   if (options.onlyStatuses?.length) {
     const set = new Set(options.onlyStatuses);
     trucks = trucks.filter((t) => set.has(t.status));
@@ -258,16 +499,22 @@ export async function healFleetFromPlayback(
     }
     const meta = deviceByImei.get(truck.imei);
     if (!meta) {
+      const memory = memoryFromLiveAndHistory({
+        online: Boolean(truck.online),
+        lat: truck.lat,
+        lng: truck.lng,
+        points: [],
+        radiusM,
+      });
       return {
         imei: truck.imei,
         plate: truck.plate,
         prev: truck.status,
-        next: truck.status,
-        memory: normalizeMemory(store[truck.imei]),
+        next: memory.status,
+        memory,
         transitions: [],
         points: 0,
         productLine: truck.productLine,
-        error: "no portal deviceId",
       } satisfies JobResult;
     }
     try {
@@ -279,16 +526,22 @@ export async function healFleetFromPlayback(
         account: meta.account,
         maxPages: 50,
       });
-      // Fresh empty start — reconstruct from trail, don't inherit bad state.
+      const memory = memoryFromLiveAndHistory({
+        online: Boolean(truck.online),
+        lat: truck.lat,
+        lng: truck.lng,
+        points: pb.points,
+        radiusM,
+      });
       const replay = replayPlaybackPoints(pb.points, undefined, radiusM);
       return {
         imei: truck.imei,
         plate: truck.plate,
         prev: truck.status,
-        next: replay.memory.status,
-        memory: replay.memory,
+        next: memory.status,
+        memory,
         transitions: replay.transitions,
-        points: replay.pointsUsed,
+        points: pb.points.length,
         productLine: truck.productLine,
       } satisfies JobResult;
     } catch (err) {
@@ -312,7 +565,6 @@ export async function healFleetFromPlayback(
       if (errors.length < 30) errors.push(`${job.plate}: ${job.error}`);
       continue;
     }
-    if (job.points === 0) continue;
 
     store[job.imei] = job.memory;
     const truck = snap.trucks.find((t) => t.imei === job.imei);
@@ -329,62 +581,23 @@ export async function healFleetFromPlayback(
   }
 
   if (!dryRun) {
-    // Serial trip reconcile from final reconstructed status (avoids KV races).
-    for (const job of jobs) {
-      if (job.error || job.points === 0) continue;
-      const final = job.memory.status;
-      const loadedFrom = job.memory.lastLoadedFrom;
-      const port = portForLoadedFrom(loadedFrom);
-
-      // Fill Unknown on any trip for this truck when history found a bay.
-      if (loadedFrom) {
-        await fillUnknownLoadedFrom({
-          imei: job.imei,
-          loadedFrom,
-          port,
-        });
-      }
-
-      if (final === "LOADED" && loadedFrom) {
-        await openTrip({
-          imei: job.imei,
-          plate: job.plate,
-          productLine: job.productLine,
-          port,
-          loadedFrom,
-        });
-        opened += 1;
-      } else if (final === "AT_FACTORY" && job.memory.lastFactory) {
-        await openTrip({
-          imei: job.imei,
-          plate: job.plate,
-          productLine: job.productLine,
-          port,
-          loadedFrom: loadedFrom || "Unknown loading point",
-        });
-        await markTripArrived({
-          imei: job.imei,
-          factory: job.memory.lastFactory,
-        });
-        arrived += 1;
-      } else if (
-        final === "ON_ROAD" ||
-        final === "PARK" ||
-        final === "LOADING" ||
-        final === "EMPTY"
-      ) {
-        const closed = await completeTrip({
-          imei: job.imei,
-          factory: job.memory.lastFactory,
-        });
-        if (closed) completed += 1;
-      }
-    }
-
     recount(snap);
     snap.fetchedAt = new Date().toISOString();
     await writeTruckStore(store);
     await writeFleetSnapshot(snap);
+    const tripSync = await reconcileTripsFromFleet(snap.trucks);
+    opened = tripSync.opened;
+    arrived = tripSync.arrived;
+    completed = tripSync.completed;
+    for (const job of jobs) {
+      if (job.error || !job.memory.lastLoadedFrom) continue;
+      await fillUnknownLoadedFrom({
+        imei: job.imei,
+        loadedFrom: job.memory.lastLoadedFrom,
+        port: portForLoadedFrom(job.memory.lastLoadedFrom),
+      });
+    }
+    await scrubUnknownFactoryFromTrips();
     await pruneOrphanOpenTrips(snap);
   } else {
     recount(snap);

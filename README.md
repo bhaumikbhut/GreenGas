@@ -20,7 +20,7 @@ Live truck map + auto status from ProTrack (portal bridge) + WhatsApp alerts via
 
 ```text
 ON_ROAD     → enter parking → PARK
-PARK        → leave parking → ON_ROAD
+PARK        → leave parking → LOADED     (yard → loading → filled)
 PARK/ON_ROAD→ enter loading → LOADING
 LOADING     → leave loading → LOADED     (filled — never empty after load bay)
 LOADED      → enter factory → AT_FACTORY
@@ -28,10 +28,10 @@ AT_FACTORY  → leave factory → ON_ROAD    (empty)
 ```
 
 - Out of **loading** → filled (`LOADED`)
+- Out of **parking** → filled (`LOADED`) — they go to the loading bay next
 - Out of **factory** → empty (`ON_ROAD`)
-- Filled truck **long stop** far from port, outside known pins → **Unknown factory**
-  - Engine OFF: ~45 min · Engine ON: ~2 h · Must be ≥20 km from loading/parking
-  - Short dinner / tea / brief breakdown stays **Filled road** (LOADED)
+- Status only from **known** loading / parking / factory pins (no “Unknown factory”)
+- Filled truck off known pins stays **Filled road** (`LOADED`) until it hits a factory pin
 - **Live map** and **Trips** stay in sync: every live GPS refresh updates status memory + opens/arrives/closes trips
 - One-time catch-up: `npx tsx scripts/heal-from-playback.ts` (portal history → statuses + Filled-at names)
 - Each loading/parking pin has its **own radius** (Neel field pins, Sep 2026)  

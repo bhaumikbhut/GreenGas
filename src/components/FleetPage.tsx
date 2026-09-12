@@ -22,7 +22,6 @@ export default function FleetPage() {
     parkingOptions,
     parkingCounts,
     productCounts,
-    data,
     setQuery,
     setStatusFilter,
     setProductFilter,

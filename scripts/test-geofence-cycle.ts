@@ -69,7 +69,7 @@ m = nextStatus({
 });
 assert(m.status === "LOADING", "PARK→LOADING");
 
-// Leave too soon (no dwell) → not LOADED, not EMPTY
+// Leave loading (2 polls) → always LOADED (no dwell required)
 let early: TruckMemory = { ...m, enteredAt: t0 + 1000 };
 early = nextStatus({
   prev: early,
@@ -88,8 +88,8 @@ early = nextStatus({
   now: t0 + 1000 + 60_000,
 });
 assert(
-  early.status === "ON_ROAD" && early.cargo === "EMPTY",
-  "short visit → ON_ROAD not EMPTY/LOADED",
+  early.status === "LOADED" && early.cargo === "LOADED",
+  "leave loading → LOADED (even short visit)",
 );
 
 // Full dwell then leave → LOADED
@@ -195,6 +195,7 @@ assert(
   "ON_ROAD keeps lastFactory after leave",
 );
 
+// LOADED without lastLoadedFrom still stays filled at parking (pin-only demotion removed)
 const bad = nextStatus({
   prev: {
     status: "LOADED",
@@ -211,7 +212,7 @@ const bad = nextStatus({
   online: true,
   now: afterDwell + 3000,
 });
-assert(bad.status === "PARK" && bad.cargo === "EMPTY", "false LOADED at parking → PARK");
+assert(bad.status === "LOADED" && bad.cargo === "LOADED", "LOADED at parking stays LOADED");
 
 const filled = nextStatus({
   prev: {
@@ -257,7 +258,10 @@ parkLeave = nextStatus({
   online: true,
   now: t0 + 2000,
 });
-assert(parkLeave.status === "ON_ROAD", "leave park → ON_ROAD not EMPTY");
+assert(
+  parkLeave.status === "LOADED" && parkLeave.cargo === "LOADED",
+  "leave park → LOADED (heading to load)",
+);
 
 let orphan: TruckMemory = {
   status: "LOADING",

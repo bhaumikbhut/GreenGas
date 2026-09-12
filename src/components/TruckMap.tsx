@@ -43,14 +43,14 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function plateTextColor(_status: string): string {
+function plateTextColor(): string {
   return "#000000";
 }
 
 function plateLabelHtml(plate: string, status: string): string {
   const text = escapeHtml(plate || "—");
   const bg = statusColor(status);
-  const fg = plateTextColor(status);
+  const fg = plateTextColor();
   return (
     `<div class="gg-plate-label" style="` +
     `margin-top:3px;max-width:120px;padding:3px 6px;border-radius:4px;` +

@@ -506,9 +506,7 @@ export async function buildFleetSnapshot(
       parkingPoint: insideParking?.point.name ?? null,
       factoryPoint:
         insideFactory?.point.name ??
-        (memory.status === "AT_FACTORY"
-          ? memory.lastFactory || "Unknown factory"
-          : null),
+        (memory.status === "AT_FACTORY" ? memory.lastFactory || null : null),
       port:
         insideLoading?.point.port ??
         insideParking?.point.port ??

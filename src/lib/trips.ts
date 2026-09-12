@@ -63,6 +63,25 @@ function isUnknownLoadedFrom(value: string | null | undefined): boolean {
   return !v || v === "unknown loading point" || v === "unknown";
 }
 
+function isUnknownFactory(value: string | null | undefined): boolean {
+  const v = (value || "").trim().toLowerCase();
+  return v === "unknown factory";
+}
+
+/** Clear legacy "Unknown factory" labels from trip history. */
+export async function scrubUnknownFactoryFromTrips(): Promise<number> {
+  const trips = await readAll();
+  let scrubbed = 0;
+  for (const t of trips) {
+    if (isUnknownFactory(t.factory)) {
+      t.factory = null;
+      scrubbed += 1;
+    }
+  }
+  if (scrubbed) await writeAll(trips);
+  return scrubbed;
+}
+
 /** Open a trip when truck becomes LOADED (filled at port). */
 export async function openTrip(input: {
   imei: string;
@@ -303,7 +322,11 @@ export async function reconcileTripsFromFleet(
       continue;
     }
 
-    if (truck.status === "AT_FACTORY" && truck.lastFactory) {
+    if (
+      truck.status === "AT_FACTORY" &&
+      truck.lastFactory &&
+      !isUnknownFactory(truck.lastFactory)
+    ) {
       if (!open) {
         const trip: Trip = {
           id: newId(),
@@ -352,7 +375,10 @@ export async function reconcileTripsFromFleet(
         truck.status === "EMPTY")
     ) {
       open.status = "DELIVERED";
-      open.factory = truck.lastFactory || open.factory;
+      open.factory =
+        truck.lastFactory && !isUnknownFactory(truck.lastFactory)
+          ? truck.lastFactory
+          : open.factory;
       open.arrivedAt = open.arrivedAt || when;
       open.departedAt = when;
       openByImei.delete(truck.imei);
