@@ -29,6 +29,7 @@ import {
 import { sendWhatsAppAlert, whatsappConfigured } from "@/lib/whatsapp";
 import {
   completeTrip,
+  fillUnknownLoadedFrom,
   markTripArrived,
   openTrip,
 } from "@/lib/trips";
@@ -352,6 +353,10 @@ export async function buildFleetSnapshot(
 
     // Trip history (always — even on live skipAlerts refreshes).
     if (becameLoaded) {
+      const loadedFrom =
+        memory.lastLoadedFrom ||
+        insideLoading?.point.name ||
+        "Unknown loading point";
       await openTrip({
         imei: device.imei,
         plate: device.plate,
@@ -360,13 +365,33 @@ export async function buildFleetSnapshot(
           insideLoading?.point.port ??
           insideParking?.point.port ??
           null,
-        loadedFrom:
-          memory.lastLoadedFrom ||
-          insideLoading?.point.name ||
-          "Unknown loading point",
+        loadedFrom,
       });
+      if (memory.lastLoadedFrom) {
+        await fillUnknownLoadedFrom({
+          imei: device.imei,
+          loadedFrom: memory.lastLoadedFrom,
+          port:
+            insideLoading?.point.port ??
+            insideParking?.point.port ??
+            null,
+        });
+      }
     }
     if (becameAtFactory && memory.lastFactory) {
+      if (memory.lastLoadedFrom) {
+        await fillUnknownLoadedFrom({
+          imei: device.imei,
+          loadedFrom: memory.lastLoadedFrom,
+        });
+      }
+      await openTrip({
+        imei: device.imei,
+        plate: device.plate,
+        productLine: device.accountLabel,
+        port: insideLoading?.point.port ?? insideParking?.point.port ?? null,
+        loadedFrom: memory.lastLoadedFrom || "Unknown loading point",
+      });
       await markTripArrived({
         imei: device.imei,
         factory: memory.lastFactory,

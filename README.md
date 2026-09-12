@@ -29,6 +29,8 @@ AT_FACTORY  → leave factory → ON_ROAD    (empty)
 
 - Out of **loading** → filled (`LOADED`)
 - Out of **factory** → empty (`ON_ROAD`)
+- **Live map** and **Trips** stay in sync: every live GPS refresh updates status memory + opens/arrives/closes trips
+- One-time catch-up: `npx tsx scripts/heal-from-playback.ts` (portal history → statuses + Filled-at names)
 - Each loading/parking pin has its **own radius** (Neel field pins, Sep 2026)  
 - Loading bay wins over parking if both apply  
 - WhatsApp on transitions + live track link (`/track/<imei>`)  

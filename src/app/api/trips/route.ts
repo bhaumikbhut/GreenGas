@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { readFleetSnapshot } from "@/lib/fleet-cache";
 import {
+  completeTrip,
+  fillUnknownLoadedFrom,
   listTrips,
   markTripArrived,
   openTrip,
@@ -10,11 +12,25 @@ import {
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Backfill open trips from current LOADED / AT_FACTORY trucks. */
+/**
+ * Keep trips history aligned with live fleet snapshot:
+ * - open / arrive from LOADED + AT_FACTORY
+ * - fill Unknown loading point when fleet knows the bay
+ * - close open trips when truck is empty again (left factory / not filled)
+ */
 async function seedFromLiveFleet(): Promise<void> {
   const snap = await readFleetSnapshot();
   if (!snap?.trucks?.length) return;
+
   for (const t of snap.trucks) {
+    if (t.lastLoadedFrom) {
+      await fillUnknownLoadedFrom({
+        imei: t.imei,
+        loadedFrom: t.lastLoadedFrom,
+        port: t.port,
+      });
+    }
+
     if (t.status === "LOADED" && t.lastLoadedFrom) {
       await openTrip({
         imei: t.imei,
@@ -24,7 +40,9 @@ async function seedFromLiveFleet(): Promise<void> {
         loadedFrom: t.lastLoadedFrom,
         at: snap.fetchedAt,
       });
+      continue;
     }
+
     if (t.status === "AT_FACTORY" && t.lastFactory) {
       await openTrip({
         imei: t.imei,
@@ -35,6 +53,21 @@ async function seedFromLiveFleet(): Promise<void> {
         at: snap.fetchedAt,
       });
       await markTripArrived({
+        imei: t.imei,
+        factory: t.lastFactory,
+        at: snap.fetchedAt,
+      });
+      continue;
+    }
+
+    // Live empty / parking / loading → any open trip should be closed
+    if (
+      t.status === "ON_ROAD" ||
+      t.status === "PARK" ||
+      t.status === "LOADING" ||
+      t.status === "EMPTY"
+    ) {
+      await completeTrip({
         imei: t.imei,
         factory: t.lastFactory,
         at: snap.fetchedAt,
