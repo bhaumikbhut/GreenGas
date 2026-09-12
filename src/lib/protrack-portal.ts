@@ -263,21 +263,65 @@ function toEpochSeconds(value: unknown): number {
   return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
 }
 
+/**
+ * OFFLINE only when GPS is really dead — not merely static / parked.
+ * ProTrack still shows last pin + ACC for hours; do not over-flag those.
+ *
+ * Online if freshest hearttime/gpstime is within PROTRACK_ONLINE_MAX_AGE_SEC
+ * (default 24h). If timestamps are missing but a map pin exists, keep online
+ * (last-known position). Otherwise use validate / explicit offline flags.
+ */
 function isOnlineFromPortal(
   row: Record<string, unknown>,
   servertime?: number,
 ): boolean {
-  const validate =
-    row.validate === true || row.validate === 1 || row.validate === "1";
-  if (!validate) return false;
-  const heart = toEpochSeconds(row.hearttime);
   const server = servertime
     ? servertime > 1e12
       ? Math.floor(servertime / 1000)
       : Math.floor(servertime)
     : Math.floor(Date.now() / 1000);
-  if (heart && server - heart > 1500) return false;
-  return true;
+
+  const flagged = row.online ?? row.isonline ?? row.status;
+  if (
+    flagged === 1 ||
+    flagged === "1" ||
+    flagged === true ||
+    flagged === "online" ||
+    flagged === "ONLINE"
+  ) {
+    return true;
+  }
+
+  const heart = toEpochSeconds(row.hearttime);
+  const gps = toEpochSeconds(row.gpstime);
+  const lastSignal = Math.max(heart || 0, gps || 0);
+  const maxAgeSec = Number(process.env.PROTRACK_ONLINE_MAX_AGE_SEC || 86400);
+
+  if (lastSignal > 0) {
+    return server - lastSignal <= maxAgeSec;
+  }
+
+  if (
+    flagged === 0 ||
+    flagged === "0" ||
+    flagged === false ||
+    flagged === "offline" ||
+    flagged === "OFFLINE"
+  ) {
+    return false;
+  }
+
+  const lat = Number(row.lat);
+  const lng = Number(row.lng);
+  const hasFix =
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    !(lat === 0 && lng === 0);
+  if (hasFix) return true;
+
+  return (
+    row.validate === true || row.validate === 1 || row.validate === "1"
+  );
 }
 
 export async function fetchPortalFleet(

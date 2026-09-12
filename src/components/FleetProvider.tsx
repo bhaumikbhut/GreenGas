@@ -183,7 +183,7 @@ export function FleetProvider({ children }: { children: ReactNode }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [productFilter, setProductFilter] = useState<"ALL" | "LPG" | "PROPANE">(
-    "ALL",
+    "PROPANE",
   );
   const [parkingFilter, setParkingFilter] = useState<string>("ALL");
   const [focusToken, setFocusToken] = useState(0);
