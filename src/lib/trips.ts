@@ -139,6 +139,16 @@ export async function completeTrip(input: {
   return trip;
 }
 
+export type TripQuery = {
+  limit?: number;
+  plate?: string;
+  port?: string;
+  factory?: string;
+  status?: TripStatus | "ALL";
+  imei?: string;
+  productLine?: "LPG" | "PROPANE" | "ALL";
+};
+
 export async function listTrips(query: TripQuery = {}): Promise<Trip[]> {
   const limit = Math.min(Math.max(query.limit ?? 100, 1), MAX_TRIPS);
   let trips = await readAll();
