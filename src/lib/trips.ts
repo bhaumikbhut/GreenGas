@@ -277,8 +277,10 @@ export async function completeTrip(input: {
   if (!trip) return null;
   trip.status = "DELIVERED";
   trip.factory = input.factory || trip.factory;
-  trip.arrivedAt = trip.arrivedAt || input.at || new Date().toISOString();
   trip.departedAt = input.at || new Date().toISOString();
+  if (trip.arrivedAt && Date.parse(trip.departedAt) < Date.parse(trip.arrivedAt)) {
+    trip.arrivedAt = trip.departedAt;
+  }
   await writeAll(trips);
   return trip;
 }
@@ -462,8 +464,14 @@ export async function reconcileTripsFromFleet(
           truck.lastFactory && !isUnknownFactory(truck.lastFactory)
             ? truck.lastFactory
             : open.factory;
-        if (!open.arrivedAt) open.arrivedAt = when;
         if (!open.departedAt) open.departedAt = when;
+        if (
+          open.arrivedAt &&
+          Date.parse(open.departedAt) < Date.parse(open.arrivedAt)
+        ) {
+          open.arrivedAt = open.departedAt;
+        }
+        // Do not invent Arrived = Left when they never had an arrival stamp.
         openByImei.delete(truck.imei);
         completed += 1;
         dirty = true;
