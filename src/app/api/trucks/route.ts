@@ -156,29 +156,31 @@ export async function GET(request: Request) {
   }
 
   const cached = await readFleetSnapshot();
+  const usable =
+    cached && cached.trucks.length > 0 ? cached : null;
 
-  if (cached && cached.trucks.length > 0) {
-    const fresh = isSnapshotFresh(cached);
+  if (usable) {
+    const fresh = isSnapshotFresh(usable);
     if (!fresh) {
       after(() => {
         void refreshFleetCache();
       });
     }
     return NextResponse.json(
-      filterSnapshot(withCacheMeta(cached, true), imeiFilter),
+      filterSnapshot(withCacheMeta(usable, true), imeiFilter),
     );
   }
 
-  // Cold start: must wait for ProTrack once.
+  // Cold start or empty failed snapshot: must wait for ProTrack once.
   const result = await refreshFleetCache();
-  if (result.snapshot) {
+  if (result.snapshot && result.snapshot.trucks.length > 0) {
     return NextResponse.json(
       filterSnapshot(withCacheMeta(result.snapshot, false), imeiFilter),
     );
   }
 
-  // Another refresh holds the lock — wait for its snapshot instead of 503.
-  const waited = await waitForCachedSnapshot(60, 500);
+  // Another refresh holds the lock — wait briefly for its snapshot.
+  const waited = await waitForCachedSnapshot(20, 400);
   if (waited && waited.trucks.length > 0) {
     return NextResponse.json(
       filterSnapshot(withCacheMeta(waited, true), imeiFilter),

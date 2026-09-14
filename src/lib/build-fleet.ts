@@ -539,7 +539,7 @@ export async function buildFleetSnapshot(
 
   // Keep trips history aligned with final statuses (one Turso round-trip).
   try {
-    await reconcileTripsFromFleet(trucks);
+    await reconcileTripsFromFleet(trucks, undefined, { createMissing: false });
   } catch {
     // Don't fail the fleet snapshot if trips KV blips
   }

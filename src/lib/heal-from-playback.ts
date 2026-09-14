@@ -21,10 +21,9 @@ import {
   listTrips,
   fillUnknownLoadedFrom,
   reconcileTripsFromFleet,
+  replaceAllTrips,
   scrubUnknownFactoryFromTrips,
-  TRIPS_KEY,
 } from "@/lib/trips";
-import { getRedis } from "@/lib/kv";
 
 export type ReplayTransition = {
   at: string;
@@ -597,7 +596,9 @@ export async function healFleetFromPlayback(
     snap.fetchedAt = new Date().toISOString();
     await writeTruckStore(store);
     await writeFleetSnapshot(snap);
-    const tripSync = await reconcileTripsFromFleet(snap.trucks);
+    const tripSync = await reconcileTripsFromFleet(snap.trucks, undefined, {
+      createMissing: false,
+    });
     opened = tripSync.opened;
     arrived = tripSync.arrived;
     completed = tripSync.completed;
@@ -644,21 +645,12 @@ export async function pruneOrphanOpenTrips(
       continue;
     }
     if (!filled.has(t.imei)) {
-      // Mark delivered rather than delete (keep history)
-      kept.push({
-        ...t,
-        status: "DELIVERED" as const,
-        departedAt: t.departedAt || new Date().toISOString(),
-        arrivedAt: t.arrivedAt || new Date().toISOString(),
-      });
+      // Don't invent arrive/leave times — drop the orphan open row.
       removed += 1;
       continue;
     }
     kept.push(t);
   }
-  const redis = getRedis();
-  if (redis) {
-    await redis.set(TRIPS_KEY, kept.slice(0, 800));
-  }
+  await replaceAllTrips(kept);
   return removed;
 }

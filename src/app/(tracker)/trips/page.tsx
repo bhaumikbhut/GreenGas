@@ -34,7 +34,14 @@ function fmtWhen(iso: string | null): string {
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: true,
   });
+}
+
+function filledAtLabel(value: string | null | undefined): string {
+  const v = (value || "").trim();
+  if (!v || /^unknown/i.test(v)) return "—";
+  return v;
 }
 
 function durationLabel(start: string, end: string | null): string {
@@ -258,8 +265,8 @@ export default function TripsPage() {
                         {t.port ? ` · ${t.port}` : ""}
                       </div>
                     </td>
-                    <td className="px-3 py-2">{t.loadedFrom}</td>
-                    <td className="px-3 py-2">{t.factory || "—"}</td>
+                    <td className="px-3 py-2">{filledAtLabel(t.loadedFrom)}</td>
+                    <td className="px-3 py-2">{filledAtLabel(t.factory)}</td>
                     <td className="px-3 py-2">
                       <span
                         className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${statusStyle(t.status)}`}
@@ -279,7 +286,11 @@ export default function TripsPage() {
                     <td className="px-3 py-2 whitespace-nowrap text-[12px]">
                       {durationLabel(
                         t.loadedAt,
-                        t.departedAt || t.arrivedAt,
+                        t.status === "DELIVERED"
+                          ? t.departedAt || t.arrivedAt
+                          : t.status === "AT_FACTORY"
+                            ? t.arrivedAt
+                            : null,
                       )}
                     </td>
                   </tr>

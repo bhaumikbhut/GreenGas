@@ -1,5 +1,6 @@
 import {
   FLEET_FRESH_SEC,
+  readFleetSnapshot,
   releaseRefreshLock,
   snapshotAgeSec,
   tryAcquireRefreshLock,
@@ -7,6 +8,27 @@ import {
 } from "@/lib/fleet-cache";
 import { buildFleetSnapshot } from "@/lib/build-fleet";
 import type { FleetSnapshot } from "@/lib/fleet-types";
+
+/** Never replace a good cache with an empty/failed GPS pull. */
+async function persistSnapshotSafely(
+  snapshot: FleetSnapshot,
+): Promise<FleetSnapshot> {
+  if (snapshot.trucks.length > 0) {
+    await writeFleetSnapshot(snapshot);
+    return snapshot;
+  }
+  const prev = await readFleetSnapshot();
+  if (prev?.trucks.length) {
+    const kept: FleetSnapshot = {
+      ...prev,
+      fetchedAt: prev.fetchedAt,
+      errors: snapshot.errors?.length ? snapshot.errors : prev.errors,
+    };
+    return kept;
+  }
+  await writeFleetSnapshot(snapshot);
+  return snapshot;
+}
 
 /**
  * Pull ProTrack once (locked), write Redis/file snapshot.
@@ -23,8 +45,7 @@ export async function refreshFleetCache(): Promise<{
   }
 
   try {
-    const snapshot = await buildFleetSnapshot();
-    await writeFleetSnapshot(snapshot);
+    const snapshot = await persistSnapshotSafely(await buildFleetSnapshot());
     return {
       snapshot,
       skipped: false,
@@ -49,8 +70,9 @@ export async function refreshFleetLiveGps(): Promise<{
   }
 
   try {
-    const snapshot = await buildFleetSnapshot({ skipAlerts: true });
-    await writeFleetSnapshot(snapshot);
+    const snapshot = await persistSnapshotSafely(
+      await buildFleetSnapshot({ skipAlerts: true }),
+    );
     return { snapshot, skipped: false };
   } finally {
     await releaseRefreshLock();

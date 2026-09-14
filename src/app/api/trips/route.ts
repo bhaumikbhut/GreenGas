@@ -76,7 +76,9 @@ export async function GET(request: Request) {
     try {
       const snap = await readFleetSnapshot();
       if (snap?.trucks?.length) {
-        seed = await reconcileTripsFromFleet(snap.trucks, snap.fetchedAt);
+        seed = await reconcileTripsFromFleet(snap.trucks, snap.fetchedAt, {
+          createMissing: false,
+        });
       }
     } catch {
       // still return trips

@@ -68,7 +68,86 @@ function isUnknownFactory(value: string | null | undefined): boolean {
   return v === "unknown factory";
 }
 
-/** Clear legacy "Unknown factory" labels from trip history. */
+export async function replaceAllTrips(trips: Trip[]): Promise<void> {
+  await writeAll(dedupeTrips(trips));
+}
+
+/** Drop clone rows and keep one open trip per truck. */
+export function dedupeTrips(trips: Trip[]): Trip[] {
+  const byImei = new Map<string, Trip[]>();
+  for (const t of trips) {
+    const list = byImei.get(t.imei) || [];
+    list.push(t);
+    byImei.set(t.imei, list);
+  }
+
+  const out: Trip[] = [];
+  for (const list of byImei.values()) {
+    const open = list
+      .filter((t) => t.status !== "DELIVERED")
+      .sort((a, b) => Date.parse(b.loadedAt) - Date.parse(a.loadedAt));
+    if (open.length) {
+      const bestOpen = open.reduce((best, t) => scoreTrip(t) > scoreTrip(best) ? t : best);
+      out.push(bestOpen);
+    }
+
+    const delivered = list
+      .filter((t) => t.status === "DELIVERED")
+      .sort((a, b) => Date.parse(b.loadedAt) - Date.parse(a.loadedAt));
+    const keptDelivered: Trip[] = [];
+    for (const t of delivered) {
+      if (isJunkTrip(t)) continue;
+      const clone = keptDelivered.find(
+        (k) =>
+          Math.abs(Date.parse(k.loadedAt) - Date.parse(t.loadedAt)) < 2 * 3600_000 &&
+          (k.factory || "") === (t.factory || ""),
+      );
+      if (clone) {
+        if (scoreTrip(t) > scoreTrip(clone)) {
+          keptDelivered.splice(keptDelivered.indexOf(clone), 1, mergeTrip(clone, t));
+        }
+        continue;
+      }
+      keptDelivered.push(t);
+    }
+    out.push(...keptDelivered);
+  }
+
+  return out.sort((a, b) => Date.parse(b.loadedAt) - Date.parse(a.loadedAt));
+}
+
+function isJunkTrip(t: Trip): boolean {
+  const loaded = Date.parse(t.loadedAt);
+  const end = Date.parse(t.departedAt || t.arrivedAt || t.loadedAt);
+  const mins = Number.isFinite(loaded) && Number.isFinite(end) ? (end - loaded) / 60000 : 0;
+  const unknown = isUnknownLoadedFrom(t.loadedFrom);
+  const noFac = !t.factory || isUnknownFactory(t.factory);
+  return unknown && noFac && mins < 20;
+}
+
+function scoreTrip(t: Trip): number {
+  let n = 0;
+  if (!isUnknownLoadedFrom(t.loadedFrom)) n += 4;
+  if (t.factory && !isUnknownFactory(t.factory)) n += 4;
+  if (t.port) n += 1;
+  if (t.arrivedAt) n += 1;
+  if (t.departedAt) n += 1;
+  return n;
+}
+
+function mergeTrip(a: Trip, b: Trip): Trip {
+  return {
+    ...a,
+    loadedFrom: isUnknownLoadedFrom(a.loadedFrom) ? b.loadedFrom : a.loadedFrom,
+    factory: a.factory && !isUnknownFactory(a.factory) ? a.factory : b.factory,
+    port: a.port || b.port,
+    arrivedAt: a.arrivedAt || b.arrivedAt,
+    departedAt: a.departedAt || b.departedAt,
+    loadedAt:
+      Date.parse(a.loadedAt) <= Date.parse(b.loadedAt) ? a.loadedAt : b.loadedAt,
+  };
+}
+
 export async function scrubUnknownFactoryFromTrips(): Promise<number> {
   const trips = await readAll();
   let scrubbed = 0;
@@ -260,8 +339,10 @@ type FleetTruckLike = {
 export async function reconcileTripsFromFleet(
   trucks: FleetTruckLike[],
   at?: string,
+  opts?: { createMissing?: boolean },
 ): Promise<{ opened: number; arrived: number; completed: number; filledUnknown: number }> {
   const when = at || new Date().toISOString();
+  const createMissing = opts?.createMissing !== false;
   const trips = await readAll();
   const openByImei = new Map<string, Trip>();
   for (const t of trips) {
@@ -291,7 +372,7 @@ export async function reconcileTripsFromFleet(
     const open = openByImei.get(truck.imei);
 
     if (truck.status === "LOADED" && truck.lastLoadedFrom) {
-      if (!open) {
+      if (!open && createMissing) {
         const trip: Trip = {
           id: newId(),
           imei: truck.imei,
@@ -312,6 +393,7 @@ export async function reconcileTripsFromFleet(
         opened += 1;
         dirty = true;
       } else if (
+        open &&
         isUnknownLoadedFrom(open.loadedFrom) &&
         !isUnknownLoadedFrom(truck.lastLoadedFrom)
       ) {
@@ -327,7 +409,7 @@ export async function reconcileTripsFromFleet(
       truck.lastFactory &&
       !isUnknownFactory(truck.lastFactory)
     ) {
-      if (!open) {
+      if (!open && createMissing) {
         const trip: Trip = {
           id: newId(),
           imei: truck.imei,
@@ -346,7 +428,7 @@ export async function reconcileTripsFromFleet(
         opened += 1;
         arrived += 1;
         dirty = true;
-      } else {
+      } else if (open) {
         if (
           isUnknownLoadedFrom(open.loadedFrom) &&
           truck.lastLoadedFrom &&
@@ -359,7 +441,7 @@ export async function reconcileTripsFromFleet(
         if (open.status !== "AT_FACTORY" || open.factory !== truck.lastFactory) {
           open.status = "AT_FACTORY";
           open.factory = truck.lastFactory;
-          open.arrivedAt = open.arrivedAt || when;
+          if (!open.arrivedAt) open.arrivedAt = when;
           arrived += 1;
           dirty = true;
         }
@@ -374,19 +456,22 @@ export async function reconcileTripsFromFleet(
         truck.status === "LOADING" ||
         truck.status === "EMPTY")
     ) {
-      open.status = "DELIVERED";
-      open.factory =
-        truck.lastFactory && !isUnknownFactory(truck.lastFactory)
-          ? truck.lastFactory
-          : open.factory;
-      open.arrivedAt = open.arrivedAt || when;
-      open.departedAt = when;
-      openByImei.delete(truck.imei);
-      completed += 1;
-      dirty = true;
+      if (open.factory || (truck.lastFactory && !isUnknownFactory(truck.lastFactory))) {
+        open.status = "DELIVERED";
+        open.factory =
+          truck.lastFactory && !isUnknownFactory(truck.lastFactory)
+            ? truck.lastFactory
+            : open.factory;
+        if (!open.arrivedAt) open.arrivedAt = when;
+        if (!open.departedAt) open.departedAt = when;
+        openByImei.delete(truck.imei);
+        completed += 1;
+        dirty = true;
+      }
     }
   }
 
-  if (dirty) await writeAll(trips);
+  const next = dedupeTrips(trips);
+  if (dirty || next.length !== trips.length) await writeAll(next);
   return { opened, arrived, completed, filledUnknown };
 }
