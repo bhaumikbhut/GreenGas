@@ -28,23 +28,25 @@ export type Trip = {
 
 async function readAll(): Promise<Trip[]> {
   const redis = getRedis();
+  let list: Trip[] = [];
   if (redis) {
     const raw = await redis.get<Trip[] | string>(TRIPS_KEY);
     if (!raw) return [];
-    const list = typeof raw === "string" ? (JSON.parse(raw) as Trip[]) : raw;
-    return Array.isArray(list) ? list : [];
+    list = typeof raw === "string" ? (JSON.parse(raw) as Trip[]) : raw;
+  } else {
+    try {
+      const text = await fs.readFile(TRIPS_FILE(), "utf8");
+      list = JSON.parse(text) as Trip[];
+    } catch {
+      return [];
+    }
   }
-  try {
-    const text = await fs.readFile(TRIPS_FILE(), "utf8");
-    const list = JSON.parse(text) as Trip[];
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
+  if (!Array.isArray(list)) return [];
+  return list.map(sanitizeTrip).filter((t) => t.status !== "DELIVERED" || !isJunkTrip(t));
 }
 
 async function writeAll(trips: Trip[]): Promise<void> {
-  const trimmed = trips.slice(0, MAX_TRIPS);
+  const trimmed = dedupeTrips(trips.map(sanitizeTrip)).slice(0, MAX_TRIPS);
   const redis = getRedis();
   if (redis) {
     await redis.set(TRIPS_KEY, trimmed);
@@ -66,6 +68,12 @@ function isUnknownLoadedFrom(value: string | null | undefined): boolean {
 function isUnknownFactory(value: string | null | undefined): boolean {
   const v = (value || "").trim().toLowerCase();
   return v === "unknown factory";
+}
+
+export async function persistSanitizedTrips(): Promise<number> {
+  const trips = await readAll();
+  await writeAll(trips);
+  return trips.length;
 }
 
 export async function replaceAllTrips(trips: Trip[]): Promise<void> {
@@ -119,10 +127,52 @@ export function dedupeTrips(trips: Trip[]): Trip[] {
 function isJunkTrip(t: Trip): boolean {
   const loaded = Date.parse(t.loadedAt);
   const end = Date.parse(t.departedAt || t.arrivedAt || t.loadedAt);
-  const mins = Number.isFinite(loaded) && Number.isFinite(end) ? (end - loaded) / 60000 : 0;
+  const mins =
+    Number.isFinite(loaded) && Number.isFinite(end)
+      ? (end - loaded) / 60000
+      : 0;
+  if (t.status === "DELIVERED" && mins < 15) return true;
   const unknown = isUnknownLoadedFrom(t.loadedFrom);
   const noFac = !t.factory || isUnknownFactory(t.factory);
   return unknown && noFac && mins < 20;
+}
+
+/** Drop illegal stamps and force Loaded ≤ Arrived ≤ Left. */
+export function sanitizeTrip(t: Trip): Trip {
+  const next: Trip = { ...t };
+  if (next.status === "IN_TRANSIT") {
+    next.arrivedAt = null;
+    next.departedAt = null;
+    next.factory = null;
+    return next;
+  }
+  if (next.status === "AT_FACTORY") {
+    next.departedAt = null;
+  }
+  const loaded = Date.parse(next.loadedAt);
+  const arrived = next.arrivedAt ? Date.parse(next.arrivedAt) : NaN;
+  const left = next.departedAt ? Date.parse(next.departedAt) : NaN;
+  const hasL = Number.isFinite(loaded);
+  const hasA = Number.isFinite(arrived);
+  const hasD = Number.isFinite(left);
+
+  if (next.status === "DELIVERED" && hasL && hasA && hasD) {
+    const stamps = [loaded, arrived, left].sort((a, b) => a - b);
+    next.loadedAt = new Date(stamps[0]).toISOString();
+    next.arrivedAt = new Date(stamps[1]).toISOString();
+    next.departedAt = new Date(stamps[2]).toISOString();
+  } else {
+    if (hasL && hasA && loaded > arrived) {
+      next.loadedAt = next.arrivedAt!;
+    }
+    if (hasA && hasD && arrived > left) {
+      next.arrivedAt = next.departedAt;
+    }
+    if (hasL && hasD && Date.parse(next.loadedAt) > left) {
+      next.loadedAt = next.departedAt!;
+    }
+  }
+  return next;
 }
 
 function scoreTrip(t: Trip): number {
@@ -275,6 +325,7 @@ export async function completeTrip(input: {
     (t) => t.imei === input.imei && t.status !== "DELIVERED",
   );
   if (!trip) return null;
+  if (trip.status !== "AT_FACTORY" && !trip.arrivedAt) return null;
   trip.status = "DELIVERED";
   trip.factory = input.factory || trip.factory;
   trip.departedAt = input.at || new Date().toISOString();
@@ -344,7 +395,7 @@ export async function reconcileTripsFromFleet(
   opts?: { createMissing?: boolean },
 ): Promise<{ opened: number; arrived: number; completed: number; filledUnknown: number }> {
   const when = at || new Date().toISOString();
-  const createMissing = opts?.createMissing !== false;
+  const createMissing = opts?.createMissing === true;
   const trips = await readAll();
   const openByImei = new Map<string, Trip>();
   for (const t of trips) {
@@ -458,7 +509,12 @@ export async function reconcileTripsFromFleet(
         truck.status === "LOADING" ||
         truck.status === "EMPTY")
     ) {
-      if (open.factory || (truck.lastFactory && !isUnknownFactory(truck.lastFactory))) {
+      const canClose = open.status === "AT_FACTORY" || Boolean(open.arrivedAt);
+      if (
+        canClose &&
+        (open.factory ||
+          (truck.lastFactory && !isUnknownFactory(truck.lastFactory)))
+      ) {
         open.status = "DELIVERED";
         open.factory =
           truck.lastFactory && !isUnknownFactory(truck.lastFactory)

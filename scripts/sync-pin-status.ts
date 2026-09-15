@@ -224,7 +224,7 @@ async function main() {
 
   await writeTruckStore(store);
   await writeFleetSnapshot(snap);
-  await reconcileTripsFromFleet(snap.trucks);
+  await reconcileTripsFromFleet(snap.trucks, undefined, { createMissing: false });
   const scrubbed = await scrubUnknownFactoryFromTrips();
   console.error(`trip factory scrubbed: ${scrubbed}`);
 

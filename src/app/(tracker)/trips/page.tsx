@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFleet } from "@/components/FleetProvider";
+import { durationLabel, displayTimes } from "@/lib/trip-display";
 
 type Trip = {
   id: string;
@@ -43,62 +44,6 @@ function filledAtLabel(value: string | null | undefined): string {
   const v = (value || "").trim();
   if (!v || /^unknown/i.test(v)) return "—";
   return v;
-}
-
-function parseMs(iso: string | null | undefined): number | null {
-  if (!iso) return null;
-  const n = Date.parse(iso);
-  return Number.isFinite(n) ? n : null;
-}
-
-/** Column times: hide events that did not happen yet; fix inverted stamps. */
-function displayTimes(t: Trip): {
-  loadedAt: string | null;
-  arrivedAt: string | null;
-  departedAt: string | null;
-} {
-  let loaded = parseMs(t.loadedAt);
-  let arrived = parseMs(t.arrivedAt);
-  let left = parseMs(t.departedAt);
-
-  if (t.status === "IN_TRANSIT") {
-    arrived = null;
-    left = null;
-  } else if (t.status === "AT_FACTORY") {
-    left = null;
-  }
-
-  // Later "now" stamp on Loaded should not sit after Arrived/Left.
-  const earliest = [arrived, left].filter((n): n is number => n != null);
-  if (loaded != null && earliest.length && loaded > Math.min(...earliest) + 60_000) {
-    loaded = Math.min(...earliest);
-  }
-  if (arrived != null && left != null && arrived > left) {
-    arrived = left;
-  }
-
-  return {
-    loadedAt: loaded != null ? new Date(loaded).toISOString() : t.loadedAt,
-    arrivedAt: arrived != null ? new Date(arrived).toISOString() : null,
-    departedAt: left != null ? new Date(left).toISOString() : null,
-  };
-}
-
-function durationLabel(t: Trip): string {
-  const times = displayTimes(t);
-  const start = parseMs(times.loadedAt);
-  if (start == null) return "—";
-  const end =
-    t.status === "DELIVERED"
-      ? parseMs(times.departedAt) ?? parseMs(times.arrivedAt)
-      : Date.now();
-  if (end == null || end < start) return "—";
-  const mins = Math.round((end - start) / 60000);
-  if (mins < 1) return "<1m";
-  if (mins < 60) return `${mins}m`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m ? `${h}h ${m}m` : `${h}h`;
 }
 
 function statusStyle(status: Trip["status"]): string {

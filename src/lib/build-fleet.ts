@@ -395,13 +395,6 @@ export async function buildFleetSnapshot(
           loadedFrom: memory.lastLoadedFrom,
         });
       }
-      await openTrip({
-        imei: device.imei,
-        plate: device.plate,
-        productLine: device.accountLabel,
-        port: insideLoading?.point.port ?? insideParking?.point.port ?? null,
-        loadedFrom: memory.lastLoadedFrom || "Unknown loading point",
-      });
       await markTripArrived({
         imei: device.imei,
         factory: memory.lastFactory,

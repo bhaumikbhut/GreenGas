@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readFleetSnapshot } from "@/lib/fleet-cache";
 import {
   listTrips,
+  persistSanitizedTrips,
   reconcileTripsFromFleet,
   type Trip,
   type TripStatus,
@@ -79,6 +80,7 @@ export async function GET(request: Request) {
         seed = await reconcileTripsFromFleet(snap.trucks, snap.fetchedAt, {
           createMissing: false,
         });
+        await persistSanitizedTrips();
       }
     } catch {
       // still return trips
