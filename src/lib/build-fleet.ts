@@ -1,9 +1,9 @@
 import { FACTORY_POINTS } from "@/lib/factory-points";
 import { readFleetSnapshot } from "@/lib/fleet-cache";
 import {
-  findNearestFactoryPoint,
   findNearestLoadingPoint,
   findNearestParkingPoint,
+  resolveFactoryGeofence,
   nextStatus,
   normalizeMemory,
   type AutoStatus,
@@ -329,7 +329,12 @@ export async function buildFleetSnapshot(
         : null;
     const insideFactory =
       track && online && hasFix
-        ? findNearestFactoryPoint(track.latitude, track.longitude, r)
+        ? resolveFactoryGeofence(
+            track.latitude,
+            track.longitude,
+            r,
+            track.speed,
+          )
         : null;
 
     const prev = store[device.imei];

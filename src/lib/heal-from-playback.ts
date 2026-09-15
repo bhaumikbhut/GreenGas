@@ -1,5 +1,5 @@
 import {
-  findNearestFactoryPoint,
+  resolveFactoryGeofence,
   findNearestLoadingPoint,
   findNearestParkingPoint,
   nextStatus,
@@ -52,10 +52,11 @@ export function replayPlaybackPoints(
     const now = p.gpstime > 1e12 ? p.gpstime : p.gpstime * 1000;
     const insideLoading = findNearestLoadingPoint(p.latitude, p.longitude);
     const insideParking = findNearestParkingPoint(p.latitude, p.longitude);
-    const insideFactory = findNearestFactoryPoint(
+    const insideFactory = resolveFactoryGeofence(
       p.latitude,
       p.longitude,
       radiusM,
+      p.speed,
     );
     const prev = memory;
     memory = nextStatus({
@@ -123,7 +124,12 @@ export function extractPinEvents(
     const atSec = toSec(p.gpstime);
     const L = findNearestLoadingPoint(p.latitude, p.longitude);
     const P = findNearestParkingPoint(p.latitude, p.longitude);
-    const F = findNearestFactoryPoint(p.latitude, p.longitude, radiusM);
+    const F = resolveFactoryGeofence(
+      p.latitude,
+      p.longitude,
+      radiusM,
+      p.speed,
+    );
 
     if (L) {
       if (!inLoad || inLoad.id !== L.point.id) {
@@ -197,6 +203,7 @@ export function memoryFromLiveAndHistory(params: {
   online: boolean;
   lat: number | null;
   lng: number | null;
+  speed?: number | null;
   points: PortalPlaybackPoint[];
   radiusM?: number;
   now?: number;
@@ -230,7 +237,12 @@ export function memoryFromLiveAndHistory(params: {
       : null;
   const insideFactory =
     params.lat != null && params.lng != null
-      ? findNearestFactoryPoint(params.lat, params.lng, radiusM)
+      ? resolveFactoryGeofence(
+          params.lat,
+          params.lng,
+          radiusM,
+          params.speed,
+        )
       : null;
 
   const lastLoadedFrom =
@@ -379,7 +391,12 @@ function applyMemoryToTruck(
   if (truck.lat != null && truck.lng != null) {
     const L = findNearestLoadingPoint(truck.lat, truck.lng);
     const P = findNearestParkingPoint(truck.lat, truck.lng);
-    const F = findNearestFactoryPoint(truck.lat, truck.lng, radiusM);
+    const F = resolveFactoryGeofence(
+      truck.lat,
+      truck.lng,
+      radiusM,
+      truck.speed,
+    );
     truck.loadingPoint = L?.point.name ?? null;
     truck.parkingPoint = P?.point.name ?? null;
     truck.factoryPoint =
@@ -514,6 +531,7 @@ export async function healFleetFromPlayback(
         online: Boolean(truck.online),
         lat: truck.lat,
         lng: truck.lng,
+        speed: truck.speed,
         points: [],
         radiusM,
       });
@@ -541,6 +559,7 @@ export async function healFleetFromPlayback(
         online: Boolean(truck.online),
         lat: truck.lat,
         lng: truck.lng,
+        speed: truck.speed,
         points: pb.points,
         radiusM,
       });

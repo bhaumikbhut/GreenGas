@@ -1,5 +1,5 @@
 import {
-  findNearestFactoryPoint,
+  resolveFactoryGeofence,
   findNearestLoadingPoint,
   findNearestParkingPoint,
 } from "@/lib/geofence";
@@ -100,7 +100,12 @@ export function walkTripsFromPlayback(
     const atSec = toSec(p.gpstime);
     const L = findNearestLoadingPoint(p.latitude, p.longitude);
     const P = findNearestParkingPoint(p.latitude, p.longitude);
-    const F = findNearestFactoryPoint(p.latitude, p.longitude, radiusM);
+    const F = resolveFactoryGeofence(
+      p.latitude,
+      p.longitude,
+      radiusM,
+      p.speed,
+    );
 
     if (L) {
       if (!inLoad || inLoad.name !== L.point.name) {

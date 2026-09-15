@@ -15,7 +15,8 @@ import {
  *   AT_FACTORY → leave factory   → ON_ROAD (empty) + lastFactory
  *   LOADED → re-enter other bay  → LOADING (next trip)
  *
- * No "Unknown factory" — status only from loading / parking / factory pins.
+ * Factory enter: painted circle while moving; nearest pin within 320 m when
+ * stopped (gate GPS). No "Unknown factory". Highway rest is not a factory.
  */
 
 /** @deprecated Unused — leave-loading no longer requires dwell. */
@@ -96,22 +97,44 @@ export function findNearestParkingPoint(
   return nearestWithOwnRadius(PARKING_POINTS, lat, lng);
 }
 
+/** GPS often sits at the yard gate, 100–300 m from the Google pin centroid. */
+export const FACTORY_GATE_MATCH_M = 320;
+/** Driving past a plant must not count as a delivery. */
+export const FACTORY_GATE_MAX_SPEED = 8;
+
 export function findNearestFactoryPoint(
   lat: number,
   lng: number,
   fallbackRadiusM: number,
+  opts?: { gateMatchM?: number },
 ): { point: FactoryPoint; distanceM: number } | null {
+  const gate = opts?.gateMatchM && opts.gateMatchM > 0 ? opts.gateMatchM : 0;
   let best: { point: FactoryPoint; distanceM: number } | null = null;
   for (const point of FACTORY_POINTS) {
-    const r =
+    const painted =
       point.radiusM && point.radiusM > 0 ? point.radiusM : fallbackRadiusM;
+    const r = Math.max(painted, gate);
     const distanceM = haversineMeters(lat, lng, point.lat, point.lng);
-    // Nearest pin inside its own radius wins (handles close factories).
+    // Nearest pin inside its match radius wins (handles close factories).
     if (distanceM <= r && (!best || distanceM < best.distanceM)) {
       best = { point, distanceM };
     }
   }
   return best;
+}
+
+/** Tight painted circle while moving; gate buffer when stopped / speed unknown. */
+export function resolveFactoryGeofence(
+  lat: number,
+  lng: number,
+  fallbackRadiusM: number,
+  speed?: number | null,
+): { point: FactoryPoint; distanceM: number } | null {
+  const moving =
+    speed != null && Number.isFinite(speed) && speed > FACTORY_GATE_MAX_SPEED;
+  return findNearestFactoryPoint(lat, lng, fallbackRadiusM, {
+    gateMatchM: moving ? 0 : FACTORY_GATE_MATCH_M,
+  });
 }
 
 export function isKnownFactoryId(id: string | null | undefined): boolean {
@@ -405,6 +428,25 @@ export function nextStatus(params: {
       status: "LOADING",
       cargo: "EMPTY",
       outsideStreak: leaveLoadingStreak,
+    };
+  }
+
+  // Known factory pin — even if memory still says empty (missed fill on the way).
+  if (params.insideFactory) {
+    return {
+      ...base,
+      status: "AT_FACTORY",
+      geofenceId: params.insideFactory.point.id,
+      geofenceKind: "factory",
+      enteredAt:
+        prev.geofenceKind === "factory" &&
+        prev.geofenceId === params.insideFactory.point.id &&
+        prev.enteredAt
+          ? prev.enteredAt
+          : now,
+      outsideStreak: 0,
+      cargo: "LOADED",
+      lastFactory: params.insideFactory.point.name,
     };
   }
 

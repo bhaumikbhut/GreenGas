@@ -13,7 +13,9 @@ export type FactoryPoint = {
  * Factory unload yards from Google Maps (customer list + Sep 2026 sheet).
  *
  * Radius ≈ 40% of distance to nearest factory, then adjusted so circles do not
- * overlap (≈50–350 m). If a truck is inside more than one circle, nearest pin wins.
+ * overlap (≈50–350 m). GPS at the gate is matched separately: a stopped truck
+ * within 320 m of the nearest pin counts as that factory. If a truck is inside
+ * more than one circle, nearest pin wins.
  */
 export const FACTORY_POINTS: FactoryPoint[] = [
   {

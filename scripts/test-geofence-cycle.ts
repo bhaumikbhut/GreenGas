@@ -1,6 +1,7 @@
 import {
   MIN_LOADING_DWELL_MS,
   nextStatus,
+  resolveFactoryGeofence,
   type TruckMemory,
 } from "../src/lib/geofence";
 import type { LoadingPoint } from "../src/lib/loading-points";
@@ -289,6 +290,42 @@ orphan = nextStatus({
   now: afterDwell + 1000,
 });
 assert(orphan.status === "LOADED", "LOADING without geofenceId + dwell → LOADED");
+
+const emptyAtFac = nextStatus({
+  prev: {
+    status: "ON_ROAD",
+    geofenceId: null,
+    geofenceKind: null,
+    enteredAt: null,
+    outsideStreak: 0,
+    cargo: "EMPTY",
+  },
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: insideF,
+  online: true,
+  now: t0 + 50_000,
+});
+assert(
+  emptyAtFac.status === "AT_FACTORY" &&
+    emptyAtFac.cargo === "LOADED" &&
+    emptyAtFac.lastFactory === factoryPt.name,
+  "empty on known factory pin → AT_FACTORY",
+);
+
+const gate = resolveFactoryGeofence(22.74731, 70.96485, 500, 0);
+assert(
+  Boolean(gate) && (gate?.distanceM ?? 999) <= 320,
+  `stopped GPS at G TONE/SEKOL gate → factory (${gate?.point.name} ${Math.round(gate?.distanceM ?? -1)}m)`,
+);
+assert(
+  resolveFactoryGeofence(22.74731, 70.96485, 500, 40) == null,
+  "moving past G TONE/SEKOL gate does not match",
+);
+assert(
+  resolveFactoryGeofence(22.908441, 70.827361, 500, 0) == null,
+  "NH27 rest 2.7 km from MONOLITH is not a factory",
+);
 
 if (fails) {
   console.error(`${fails} failed`);

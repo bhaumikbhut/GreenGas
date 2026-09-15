@@ -26,9 +26,9 @@ const skipRefresh = args.includes("--skip-refresh");
 
 async function main() {
   const {
-    findNearestFactoryPoint,
     findNearestLoadingPoint,
     findNearestParkingPoint,
+    resolveFactoryGeofence,
     nextStatus,
     normalizeMemory,
   } = await import("../src/lib/geofence");
@@ -101,7 +101,12 @@ async function main() {
 
     const insideLoading = findNearestLoadingPoint(t.lat, t.lng);
     const insideParking = findNearestParkingPoint(t.lat, t.lng);
-    const insideFactory = findNearestFactoryPoint(t.lat, t.lng, radiusM);
+    const insideFactory = resolveFactoryGeofence(
+      t.lat,
+      t.lng,
+      radiusM,
+      t.speed,
+    );
 
     // Pin override: empty truck sitting on a known factory → at factory (filled).
     if (
