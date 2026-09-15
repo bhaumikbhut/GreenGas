@@ -82,10 +82,34 @@ const inverted = displayTimes({
   arrivedAt: "2026-09-14T17:04:51.000Z",
   departedAt: "2026-09-14T17:04:51.000Z",
 });
+assert(inverted.loadedAt == null, "same-clock delivered hides Loaded copy");
+assert(Boolean(inverted.arrivedAt), "same-clock delivered keeps Arrived");
+
+const sameClock = displayTimes({
+  status: "AT_FACTORY",
+  loadedAt: "2026-09-15T06:10:55.031Z",
+  arrivedAt: "2026-09-15T06:10:55.031Z",
+  departedAt: null,
+});
+assert(sameClock.loadedAt == null, "identical Loaded/Arrived hides Loaded");
 assert(
-  Date.parse(inverted.loadedAt!) <= Date.parse(inverted.arrivedAt!) &&
-    Date.parse(inverted.arrivedAt!) <= Date.parse(inverted.departedAt!),
-  "inverted delivered stamps sort Loaded ≤ Arrived ≤ Left",
+  Boolean(sameClock.arrivedAt?.startsWith("2026-09-15T06:10")),
+  "identical clocks keep Arrived",
+);
+
+const split = displayTimes({
+  status: "AT_FACTORY",
+  loadedAt: "2026-09-15T02:00:00.000Z",
+  arrivedAt: "2026-09-15T08:00:00.000Z",
+  departedAt: null,
+});
+assert(
+  Boolean(split.loadedAt?.startsWith("2026-09-15T02:00")),
+  "hours-apart Loaded stays",
+);
+assert(
+  Boolean(split.arrivedAt?.startsWith("2026-09-15T08:00")),
+  "hours-apart Arrived stays",
 );
 
 assert(

@@ -195,6 +195,60 @@ export function extractPinEvents(
   };
 }
 
+function isoFromSec(sec: number): string {
+  return new Date(sec * 1000).toISOString();
+}
+
+export type GpsTripStamps = {
+  loadedAt: string | null;
+  arrivedAt: string | null;
+  departedAt: string | null;
+  loadedFrom: string | null;
+  factory: string | null;
+  port: string | null;
+};
+
+const MIN_LOAD_TO_ARRIVE_MS = 10 * 60_000;
+
+/**
+ * Loaded = last leave-load/park before factory enter.
+ * Arrived = factory enter. Left = real factory leave (15+ min dwell).
+ * If GPS never saw a port leave, Loaded stays null rather than copying Arrived.
+ */
+export function gpsTripStamps(
+  points: PortalPlaybackPoint[],
+  radiusM = 500,
+): GpsTripStamps {
+  const ev = extractPinEvents(points, radiusM);
+  const enter = ev.stillInFactory || ev.lastEnterFactory;
+  const leave = ev.lastRealFactoryLeave;
+  const enterSec = enter?.atSec ?? Number.POSITIVE_INFINITY;
+
+  const portHits = [ev.lastLeaveLoad, ev.lastLeavePark].filter(
+    (h): h is PinHit => h != null && h.atSec <= enterSec + 120,
+  );
+  portHits.sort((a, b) => b.atSec - a.atSec);
+  const loaded = portHits[0] ?? null;
+
+  const arrivedAt = enter ? isoFromSec(enter.atSec) : null;
+  const departedAt = leave ? isoFromSec(leave.atSec) : null;
+  let loadedAt = loaded ? isoFromSec(loaded.atSec) : null;
+
+  if (loadedAt && arrivedAt) {
+    const diff = Date.parse(arrivedAt) - Date.parse(loadedAt);
+    if (diff < MIN_LOAD_TO_ARRIVE_MS) loadedAt = null;
+  }
+
+  return {
+    loadedAt,
+    arrivedAt,
+    departedAt,
+    loadedFrom: loaded?.name ?? null,
+    factory: enter?.name ?? leave?.name ?? null,
+    port: loaded?.port ?? null,
+  };
+}
+
 /**
  * Cargo from history (last leave-loading vs last leave-factory),
  * then current status from the live GPS pin.

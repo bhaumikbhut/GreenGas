@@ -1,5 +1,8 @@
 export type TripStatus = "IN_TRANSIT" | "AT_FACTORY" | "DELIVERED";
 
+/** Loaded and Arrived closer than this are the same poll, not two events. */
+export const SAME_CLOCK_MS = 10 * 60_000;
+
 export type TripTimes = {
   status: TripStatus;
   loadedAt: string | null | undefined;
@@ -50,16 +53,20 @@ export function displayTimes(t: TripTimes): {
       arrived = stamps[1];
       left = stamps[2];
     } else {
-      if (loaded != null && arrived != null && loaded > arrived) loaded = arrived;
       if (arrived != null && left != null && arrived > left) arrived = left;
       if (loaded != null && left != null && loaded > left) loaded = left;
     }
-  } else if (loaded != null && arrived != null && loaded > arrived) {
-    loaded = arrived;
+  }
+
+  // Never show Loaded as a copy of Arrived (sync stamped both as "now").
+  if (loaded != null && arrived != null) {
+    if (loaded > arrived || arrived - loaded < SAME_CLOCK_MS) {
+      loaded = null;
+    }
   }
 
   return {
-    loadedAt: toIso(loaded) ?? t.loadedAt ?? null,
+    loadedAt: toIso(loaded),
     arrivedAt: toIso(arrived),
     departedAt: toIso(left),
   };
@@ -67,7 +74,9 @@ export function displayTimes(t: TripTimes): {
 
 export function durationLabel(t: TripTimes, nowMs = Date.now()): string {
   const times = displayTimes(t);
-  const start = parseMs(times.loadedAt);
+  const start =
+    parseMs(times.loadedAt) ??
+    (t.status === "IN_TRANSIT" ? null : parseMs(times.arrivedAt));
   if (start == null) return "—";
   const end =
     t.status === "DELIVERED"

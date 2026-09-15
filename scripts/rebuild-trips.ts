@@ -115,8 +115,7 @@ async function main() {
           factory: t.status === "AT_FACTORY" ? t.lastFactory : null,
           status: t.status === "AT_FACTORY" ? "AT_FACTORY" : "IN_TRANSIT",
           loadedAt: last.departedAt || last.loadedAt,
-          arrivedAt:
-            t.status === "AT_FACTORY" ? last.departedAt || last.loadedAt : null,
+          arrivedAt: null,
           departedAt: null,
         });
         last = drafts[drafts.length - 1];
@@ -125,7 +124,7 @@ async function main() {
         if (t.status === "AT_FACTORY" && t.lastFactory) {
           last.status = "AT_FACTORY";
           last.factory = t.lastFactory;
-          last.arrivedAt = last.arrivedAt || last.loadedAt;
+          last.departedAt = null;
         } else if (t.status === "LOADED") {
           last.status = "IN_TRANSIT";
           last.factory = null;

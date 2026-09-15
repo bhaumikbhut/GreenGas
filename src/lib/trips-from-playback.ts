@@ -5,6 +5,7 @@ import {
 } from "@/lib/geofence";
 import { PORT_LOADING_POINTS } from "@/lib/loading-points";
 import type { PortalPlaybackPoint } from "@/lib/protrack-portal";
+import { SAME_CLOCK_MS } from "@/lib/trip-display";
 import type { Trip, TripStatus } from "@/lib/trips";
 
 const MIN_FACTORY_DWELL_SEC = 15 * 60;
@@ -79,7 +80,7 @@ export function walkTripsFromPlayback(
   };
 
   const arrive = (atSec: number, factory: string) => {
-    if (!open) startOrUpdate(atSec, null, null);
+    // Never open a trip at factory-enter — that stamps Loaded = Arrived.
     if (!open) return;
     open.factory = factory;
     open.arrivedAt = open.arrivedAt || iso(atSec);
@@ -173,4 +174,88 @@ export function draftsToTrips(
     arrivedAt: d.arrivedAt,
     departedAt: d.departedAt,
   }));
+}
+
+function sameName(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const aa = (a || "").trim().toUpperCase();
+  const bb = (b || "").trim().toUpperCase();
+  return Boolean(aa && bb && aa === bb);
+}
+
+function distinctFromArrived(loadedAt: string, arrivedAt: string | null): boolean {
+  if (!arrivedAt) return true;
+  const a = Date.parse(loadedAt);
+  const b = Date.parse(arrivedAt);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return true;
+  return b - a >= SAME_CLOCK_MS;
+}
+
+/** Closest GPS walk draft for an existing trip row. */
+export function pickDraftForTrip(
+  trip: Pick<Trip, "status" | "factory" | "loadedAt" | "arrivedAt" | "departedAt">,
+  drafts: TripDraft[],
+): TripDraft | null {
+  if (!drafts.length) return null;
+  const fac = drafts.filter((d) => sameName(d.factory, trip.factory));
+  const pool = fac.length ? fac : drafts.filter((d) => d.arrivedAt || d.status !== "IN_TRANSIT");
+  if (trip.status === "AT_FACTORY") {
+    const open =
+      pool.filter((d) => d.status === "AT_FACTORY").at(-1) ||
+      pool.filter((d) => d.arrivedAt && !d.departedAt).at(-1);
+    if (open) return open;
+  }
+  const target = Date.parse(
+    trip.departedAt || trip.arrivedAt || trip.loadedAt,
+  );
+  if (!Number.isFinite(target) || !pool.length) return pool.at(-1) ?? drafts.at(-1) ?? null;
+  return pool.reduce((best, d) => {
+    const t = Date.parse(d.departedAt || d.arrivedAt || d.loadedAt);
+    const bestT = Date.parse(best.departedAt || best.arrivedAt || best.loadedAt);
+    return Math.abs(t - target) < Math.abs(bestT - target) ? d : best;
+  });
+}
+
+export function applyDraftTimes(
+  trip: Trip,
+  draft: TripDraft,
+): { trip: Trip; changed: boolean } {
+  const next = { ...trip };
+  let changed = false;
+  if (draft.arrivedAt && next.arrivedAt !== draft.arrivedAt) {
+    next.arrivedAt = draft.arrivedAt;
+    changed = true;
+  }
+  if (
+    draft.loadedAt &&
+    distinctFromArrived(draft.loadedAt, draft.arrivedAt || next.arrivedAt) &&
+    next.loadedAt !== draft.loadedAt
+  ) {
+    next.loadedAt = draft.loadedAt;
+    changed = true;
+  }
+  if (
+    next.status === "DELIVERED" &&
+    draft.departedAt &&
+    next.departedAt !== draft.departedAt
+  ) {
+    next.departedAt = draft.departedAt;
+    changed = true;
+  }
+  if (
+    draft.loadedFrom &&
+    !/^unknown/i.test(draft.loadedFrom) &&
+    /^unknown/i.test(next.loadedFrom || "")
+  ) {
+    next.loadedFrom = draft.loadedFrom;
+    next.port = draft.port ?? next.port;
+    changed = true;
+  }
+  if (draft.factory && !next.factory) {
+    next.factory = draft.factory;
+    changed = true;
+  }
+  return { trip: next, changed };
 }

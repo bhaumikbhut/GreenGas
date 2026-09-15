@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { dataDir } from "./data-dir";
 import { getRedis } from "./kv";
+import { SAME_CLOCK_MS } from "./trip-display";
 
 export const TRIPS_KEY = "green-gas:trips:v1";
 const TRIPS_FILE = () => path.join(dataDir(), "trips.json");
@@ -162,14 +163,9 @@ export function sanitizeTrip(t: Trip): Trip {
     next.arrivedAt = new Date(stamps[1]).toISOString();
     next.departedAt = new Date(stamps[2]).toISOString();
   } else {
-    if (hasL && hasA && loaded > arrived) {
-      next.loadedAt = next.arrivedAt!;
-    }
+    // Do not copy Arrived onto Loaded — that makes both clocks identical.
     if (hasA && hasD && arrived > left) {
       next.arrivedAt = next.departedAt;
-    }
-    if (hasL && hasD && Date.parse(next.loadedAt) > left) {
-      next.loadedAt = next.departedAt!;
     }
   }
   return next;
@@ -309,7 +305,10 @@ export async function markTripArrived(input: {
   }
   trip.status = "AT_FACTORY";
   trip.factory = input.factory;
-  trip.arrivedAt = trip.arrivedAt || input.at || new Date().toISOString();
+  const at = input.at || new Date().toISOString();
+  if (!trip.arrivedAt && stampsAreDistinct(trip.loadedAt, at)) {
+    trip.arrivedAt = at;
+  }
   await writeAll(trips);
   return trip;
 }
@@ -334,6 +333,18 @@ export async function completeTrip(input: {
   }
   await writeAll(trips);
   return trip;
+}
+
+function stampsAreDistinct(
+  earlier: string | null | undefined,
+  later: string | null | undefined,
+): boolean {
+  if (!later) return false;
+  if (!earlier) return true;
+  const a = Date.parse(earlier);
+  const b = Date.parse(later);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return true;
+  return b - a >= SAME_CLOCK_MS;
 }
 
 export type TripQuery = {
@@ -494,7 +505,9 @@ export async function reconcileTripsFromFleet(
         if (open.status !== "AT_FACTORY" || open.factory !== truck.lastFactory) {
           open.status = "AT_FACTORY";
           open.factory = truck.lastFactory;
-          if (!open.arrivedAt) open.arrivedAt = when;
+          if (!open.arrivedAt && stampsAreDistinct(open.loadedAt, when)) {
+            open.arrivedAt = when;
+          }
           arrived += 1;
           dirty = true;
         }
