@@ -259,9 +259,9 @@ const filled = nextStatus({
   online: true,
   now: afterDwell + 3000,
 });
-assert(filled.status === "LOADED", "real LOADED at parking stays LOADED");
+assert(filled.status === "PARK" && filled.cargo === "EMPTY", "go to parking → PARK empty");
 
-// Leave park → ON_ROAD (not EMPTY)
+// Leave park → ON_ROAD empty
 let parkLeave: TruckMemory = {
   status: "PARK",
   geofenceId: parkPt.id,
@@ -288,8 +288,8 @@ parkLeave = nextStatus({
   now: t0 + 2000,
 });
 assert(
-  parkLeave.status === "LOADED" && parkLeave.cargo === "LOADED",
-  "leave park → LOADED (heading to load)",
+  parkLeave.status === "ON_ROAD" && parkLeave.cargo === "EMPTY",
+  "leave park → ON_ROAD empty",
 );
 
 let orphan: TruckMemory = {
@@ -972,6 +972,37 @@ const inBoxPark = nextStatus({
 assert(
   inBoxPark.status === "PARK" && inBoxPark.cargo === "EMPTY",
   "inside IOCL parking box → PARK even after filling here",
+);
+
+const ioclApronLat = 23.0353;
+const ioclApronLng = 70.19785;
+assert(
+  !pointInFencePolygon(ioclApronLat, ioclApronLng, IOCL_PARK_POLYGON),
+  "IOCL east-road apron is outside the parking outline",
+);
+const ioclApron = nextStatus({
+  prev: {
+    status: "LOADED",
+    geofenceId: null,
+    geofenceKind: null,
+    enteredAt: null,
+    outsideStreak: 0,
+    cargo: "LOADED",
+    lastLoadedFrom: "Kandla IOCL Loading Point",
+    lastPark: ioclParkPt.name,
+  },
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: none,
+  online: true,
+  now: t0 + 85_000,
+  lat: ioclApronLat,
+  lng: ioclApronLng,
+  speed: 0,
+});
+assert(
+  ioclApron.status === "ON_ROAD" && ioclApron.cargo === "EMPTY",
+  "stopped just outside IOCL parking → empty (not filled)",
 );
 
 const staleGps = nextStatus({

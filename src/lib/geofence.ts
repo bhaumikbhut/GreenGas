@@ -8,8 +8,8 @@ import {
 
 /**
  * Trip cycle (GPS only — known pins only):
- *   ON_ROAD → enter parking      → PARK
- *   PARK → leave parking         → LOADED (port yard → loading → filled)
+ *   ON_ROAD → enter parking      → PARK (empty)
+ *   PARK → leave parking         → ON_ROAD (empty)
  *   PARK/ON_ROAD → enter loading → LOADING
  *   LOADING → leave loading      → LOADED (filled)
  *   LOADED → enter factory pin   → AT_FACTORY
@@ -246,6 +246,63 @@ export function findNearestParkingPoint(
 export const FACTORY_GATE_MATCH_M = 320;
 /** Driving past a plant must not count as a delivery. */
 export const FACTORY_GATE_MAX_SPEED = 8;
+/** Stopped just outside an outlined parking yard is still empty (queue / road). */
+export const PARK_APRON_EMPTY_M = 120;
+
+function localEastNorthM(
+  lat: number,
+  lng: number,
+  fromLat: number,
+  fromLng: number,
+): { eastM: number; northM: number } {
+  return {
+    northM: toRad(lat - fromLat) * EARTH_RADIUS_M,
+    eastM:
+      toRad(lng - fromLng) * EARTH_RADIUS_M * Math.cos(toRad(fromLat)),
+  };
+}
+
+function distanceToSegmentM(
+  lat: number,
+  lng: number,
+  a: [number, number],
+  b: [number, number],
+): number {
+  const A = localEastNorthM(a[0], a[1], lat, lng);
+  const B = localEastNorthM(b[0], b[1], lat, lng);
+  const abe = B.eastM - A.eastM;
+  const abn = B.northM - A.northM;
+  const len2 = abe * abe + abn * abn;
+  const t =
+    len2 <= 1e-6
+      ? 0
+      : Math.max(0, Math.min(1, (-A.eastM * abe - A.northM * abn) / len2));
+  const e = A.eastM + t * abe;
+  const n = A.northM + t * abn;
+  return Math.hypot(e, n);
+}
+
+/** 0 if inside the outline; otherwise meters to the nearest edge. */
+export function distanceToYardOutlineM(
+  lat: number,
+  lng: number,
+  point: LoadingPoint,
+): number | null {
+  const outline = fenceOutline(point);
+  if (!outline || outline.length < 3) return null;
+  if (pointInFencePolygon(lat, lng, outline)) return 0;
+  let min = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < outline.length; i++) {
+    const d = distanceToSegmentM(
+      lat,
+      lng,
+      outline[i],
+      outline[(i + 1) % outline.length],
+    );
+    if (d < min) min = d;
+  }
+  return min;
+}
 
 export function findNearestFactoryPoint(
   lat: number,
@@ -510,13 +567,8 @@ export function nextStatus(params: {
       };
     }
 
-    // Outlined yards (IOCL parking): GPS inside the outline is PARK, even after a fill.
-    // Other parking: only empty the truck when it is a *different* port.
-    if (
-      params.insideParking &&
-      (hasYardOutline(params.insideParking.point) ||
-        !samePortFacility(params.insideParking.point, prev.lastLoadedFrom))
-    ) {
+    // Filled trucks never return to parking — GPS in the yard is empty.
+    if (params.insideParking) {
       return {
         ...base,
         status: "PARK",
@@ -528,6 +580,32 @@ export function nextStatus(params: {
         lastLoadedFrom: null,
         lastPark: params.insideParking.point.name,
       };
+    }
+
+    // Stopped on the road just outside an outlined parking yard is empty
+    // (queue / admin road). Moving filled trucks stay LOADED.
+    if (
+      params.lat != null &&
+      params.lng != null &&
+      (params.speed == null || params.speed <= FACTORY_GATE_MAX_SPEED)
+    ) {
+      for (const p of PARKING_POINTS) {
+        if (!hasYardOutline(p)) continue;
+        const d = distanceToYardOutlineM(params.lat, params.lng, p);
+        if (d != null && d <= PARK_APRON_EMPTY_M) {
+          return {
+            ...base,
+            status: d === 0 ? "PARK" : "ON_ROAD",
+            geofenceId: d === 0 ? p.id : null,
+            geofenceKind: d === 0 ? "parking" : null,
+            enteredAt: d === 0 ? now : null,
+            outsideStreak: 0,
+            cargo: "EMPTY",
+            lastLoadedFrom: null,
+            lastPark: p.name,
+          };
+        }
+      }
     }
 
     // Filled on road (only known pins can change this).
@@ -632,20 +710,15 @@ export function nextStatus(params: {
 
   if (wasPark && leaveParkStreak >= 2) {
     const fromPark = PARKING_POINTS.find((p) => p.id === prev.geofenceId);
-    const loadedFrom =
-      prev.lastLoadedFrom ??
-      PORT_LOADING_POINTS.find((p) => p.port === fromPark?.port)?.name ??
-      null;
-    // Left port parking → heading to / through loading → filled, not empty.
     return {
       ...base,
-      status: "LOADED",
+      status: "ON_ROAD",
       geofenceId: null,
       geofenceKind: null,
       enteredAt: null,
       outsideStreak: 0,
-      cargo: "LOADED",
-      lastLoadedFrom: loadedFrom,
+      cargo: "EMPTY",
+      lastLoadedFrom: null,
       lastPark: prev.lastPark ?? fromPark?.name ?? null,
     };
   }
