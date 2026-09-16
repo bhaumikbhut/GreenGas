@@ -7,6 +7,7 @@ import {
   type Trip,
   type TripStatus,
 } from "@/lib/trips";
+import { istRangeMs, tripOverlapsRange } from "@/lib/trip-range";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -19,7 +20,8 @@ function filterTrips(
     factory?: string;
     imei?: string;
     status?: TripStatus | "ALL";
-    limit: number;
+    from?: string;
+    to?: string;
   },
 ): Trip[] {
   const plateQ = opts.plate?.trim().toLowerCase();
@@ -28,6 +30,7 @@ function filterTrips(
   const statusQ =
     opts.status && opts.status !== "ALL" ? opts.status : null;
   const imeiQ = opts.imei?.trim();
+  const range = istRangeMs(opts.from || "", opts.to || "");
 
   return all
     .filter((t) => {
@@ -41,9 +44,9 @@ function filterTrips(
       if (factoryQ && !(t.factory ?? "").toLowerCase().includes(factoryQ)) {
         return false;
       }
+      if (range && !tripOverlapsRange(t, range.fromMs, range.toMs)) return false;
       return true;
-    })
-    .slice(0, opts.limit);
+    });
 }
 
 /**
@@ -57,6 +60,8 @@ export async function GET(request: Request) {
   const port = searchParams.get("port") || undefined;
   const factory = searchParams.get("factory") || undefined;
   const imei = searchParams.get("imei") || undefined;
+  const from = searchParams.get("from") || undefined;
+  const to = searchParams.get("to") || undefined;
   const statusRaw = searchParams.get("status") || "ALL";
   const status =
     statusRaw === "IN_TRANSIT" ||
@@ -89,22 +94,28 @@ export async function GET(request: Request) {
 
   // Single KV read for list + counts
   const all = await listTrips({ limit: 800, status: "ALL" });
-  const trips = filterTrips(all, {
+  const matched = filterTrips(all, {
     plate,
     port,
     factory,
     imei,
     status,
-    limit: Number.isFinite(limit) ? limit : 150,
+    from,
+    to,
   });
+  const cap = Number.isFinite(limit) ? limit : 150;
+  const trips = matched.slice(0, cap);
 
-  const inTransit = all.filter((t) => t.status === "IN_TRANSIT").length;
-  const atFactory = all.filter((t) => t.status === "AT_FACTORY").length;
-  const delivered = all.filter((t) => t.status === "DELIVERED").length;
+  const inTransit = matched.filter((t) => t.status === "IN_TRANSIT").length;
+  const atFactory = matched.filter((t) => t.status === "AT_FACTORY").length;
+  const delivered = matched.filter((t) => t.status === "DELIVERED").length;
 
   return NextResponse.json({
     ok: true,
     count: trips.length,
+    stored: all.length,
+    from: from || null,
+    to: to || null,
     counts: { inTransit, atFactory, delivered },
     trips,
     ...(seed ? { seed } : {}),

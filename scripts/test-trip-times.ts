@@ -1,5 +1,12 @@
 import { displayTimes, durationLabel } from "../src/lib/trip-display";
 import { sanitizeTrip, type Trip } from "../src/lib/trips";
+import {
+  istRangeMs,
+  tripOverlapsRange,
+  formatIstRangeLabel,
+  eventCountsInRange,
+  dateRangeButtonLabel,
+} from "../src/lib/trip-range";
 
 let fails = 0;
 function assert(cond: boolean, msg: string) {
@@ -140,6 +147,64 @@ const junk: Trip = {
 };
 const cleaned = sanitizeTrip(junk);
 assert(cleaned.arrivedAt == null && cleaned.departedAt == null && cleaned.factory == null, "sanitize in-transit");
+
+const sep16 = istRangeMs("2026-09-16", "2026-09-16")!;
+assert(sep16.fromMs === Date.parse("2026-09-15T18:30:00.000Z"), "IST day starts 18:30 UTC previous");
+const deliveredYesterday = {
+  status: "DELIVERED",
+  loadedAt: "2026-09-15T02:00:00.000Z",
+  arrivedAt: "2026-09-15T10:00:00.000Z",
+  departedAt: "2026-09-15T12:00:00.000Z",
+};
+assert(
+  !tripOverlapsRange(deliveredYesterday, sep16.fromMs, sep16.toMs),
+  "delivered previous IST day is outside Today",
+);
+const openOld = {
+  status: "IN_TRANSIT" as const,
+  loadedAt: "2026-09-14T04:00:00.000Z",
+  arrivedAt: null,
+  departedAt: null,
+};
+assert(
+  !tripOverlapsRange(openOld, sep16.fromMs, sep16.toMs),
+  "open trip loaded earlier does not count on Today",
+);
+const loadedToday = {
+  status: "IN_TRANSIT" as const,
+  loadedAt: "2026-09-16T04:00:00.000Z",
+  arrivedAt: null,
+  departedAt: null,
+};
+assert(
+  tripOverlapsRange(loadedToday, sep16.fromMs, sep16.toMs),
+  "loaded today is in Today's range",
+);
+const mixed = eventCountsInRange(
+  [
+    {
+      loadedAt: "2026-09-16T04:00:00.000Z",
+      arrivedAt: null,
+      departedAt: null,
+    },
+    {
+      loadedAt: "2026-09-14T04:00:00.000Z",
+      arrivedAt: "2026-09-16T05:00:00.000Z",
+      departedAt: "2026-09-16T08:00:00.000Z",
+    },
+  ],
+  sep16.fromMs,
+  sep16.toMs,
+);
+assert(mixed.loaded === 1, "range Loaded counts only loads that day");
+assert(mixed.arrived === 1, "range Arrived counts factory enter that day");
+assert(mixed.left === 1, "range Left counts factory leave that day");
+assert(
+  formatIstRangeLabel("2026-09-10", "2026-09-16").includes("Sep"),
+  "range label uses calendar dates",
+);
+assert(dateRangeButtonLabel("today", "2026-09-16", "2026-09-16") === "Today", "closed picker says Today");
+assert(dateRangeButtonLabel("all", "", "") === "All time", "closed picker says All time");
 
 if (fails) {
   console.error(`${fails} failed`);

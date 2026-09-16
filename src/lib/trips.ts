@@ -3,6 +3,7 @@ import path from "path";
 import { dataDir } from "./data-dir";
 import { getRedis } from "./kv";
 import { SAME_CLOCK_MS } from "./trip-display";
+import { istRangeMs, tripOverlapsRange } from "./trip-range";
 
 export const TRIPS_KEY = "green-gas:trips:v1";
 const TRIPS_FILE = () => path.join(dataDir(), "trips.json");
@@ -355,6 +356,10 @@ export type TripQuery = {
   status?: TripStatus | "ALL";
   imei?: string;
   productLine?: "LPG" | "PROPANE" | "ALL";
+  /** Inclusive IST calendar day YYYY-MM-DD */
+  from?: string;
+  /** Inclusive IST calendar day YYYY-MM-DD */
+  to?: string;
 };
 
 export async function listTrips(query: TripQuery = {}): Promise<Trip[]> {
@@ -366,6 +371,7 @@ export async function listTrips(query: TripQuery = {}): Promise<Trip[]> {
   const statusQ = query.status && query.status !== "ALL" ? query.status : null;
   const imeiQ = query.imei?.trim();
   const productQ = query.productLine;
+  const range = istRangeMs(query.from || "", query.to || "");
 
   trips = trips.filter((t) => {
     if (imeiQ && t.imei !== imeiQ) return false;
@@ -380,6 +386,7 @@ export async function listTrips(query: TripQuery = {}): Promise<Trip[]> {
     if (factoryQ && !(t.factory ?? "").toLowerCase().includes(factoryQ)) {
       return false;
     }
+    if (range && !tripOverlapsRange(t, range.fromMs, range.toMs)) return false;
     return true;
   });
 

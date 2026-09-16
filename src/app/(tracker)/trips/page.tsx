@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFleet } from "@/components/FleetProvider";
 import { durationLabel, displayTimes } from "@/lib/trip-display";
+import {
+  formatIstRangeLabel,
+  presetRange,
+  type DatePreset,
+} from "@/lib/trip-range";
+import DateRangeFilter from "@/components/DateRangeFilter";
 
 type Trip = {
   id: string;
@@ -21,6 +27,9 @@ type Trip = {
 type TripsResponse = {
   ok: boolean;
   count: number;
+  stored?: number;
+  from?: string | null;
+  to?: string | null;
   counts: { inTransit: number; atFactory: number; delivered: number };
   trips: Trip[];
   error?: string;
@@ -58,6 +67,12 @@ function statusLabel(status: Trip["status"]): string {
   return "In transit";
 }
 
+function matchPreset(from: string, to: string, preset: DatePreset): boolean {
+  const range = presetRange(preset);
+  if (!range) return !from && !to;
+  return from === range.from && to === range.to;
+}
+
 export default function TripsPage() {
   const { productFilter, setProductFilter } = useFleet();
   const [data, setData] = useState<TripsResponse | null>(null);
@@ -66,15 +81,41 @@ export default function TripsPage() {
   const [port, setPort] = useState("");
   const [factory, setFactory] = useState("");
   const [status, setStatus] = useState<"ALL" | Trip["status"]>("ALL");
+  const initial = presetRange("today")!;
+  const [preset, setPreset] = useState<DatePreset | "custom">("today");
+  const [from, setFrom] = useState(initial.from);
+  const [to, setTo] = useState(initial.to);
+
+  const applyPreset = (next: DatePreset) => {
+    setPreset(next);
+    const range = presetRange(next);
+    if (!range) {
+      setFrom("");
+      setTo("");
+      return;
+    }
+    setFrom(range.from);
+    setTo(range.to);
+  };
+
+  const applyCustom = (nextFrom: string, nextTo: string) => {
+    setFrom(nextFrom);
+    setTo(nextTo);
+    if (matchPreset(nextFrom, nextTo, "today")) setPreset("today");
+    else if (matchPreset(nextFrom, nextTo, "7d")) setPreset("7d");
+    else setPreset("custom");
+  };
 
   const load = useCallback(async () => {
     try {
       const q = new URLSearchParams();
-      q.set("limit", "200");
+      q.set("limit", "800");
       if (plate.trim()) q.set("plate", plate.trim());
       if (port.trim()) q.set("port", port.trim());
       if (factory.trim()) q.set("factory", factory.trim());
       if (status !== "ALL") q.set("status", status);
+      if (from) q.set("from", from);
+      if (to) q.set("to", to);
       const res = await fetch(`/api/trips?${q}`, { cache: "no-store" });
       const json = (await res.json()) as TripsResponse;
       setData(json);
@@ -89,7 +130,7 @@ export default function TripsPage() {
     } finally {
       setLoading(false);
     }
-  }, [plate, port, factory, status]);
+  }, [plate, port, factory, status, from, to]);
 
   useEffect(() => {
     setLoading(true);
@@ -129,41 +170,51 @@ export default function TripsPage() {
     [trips],
   );
 
+  const rangeLabel = formatIstRangeLabel(from || null, to || null);
+
   const emptyHint = useMemo(() => {
     if (loading) return "Loading trips…";
     if (data?.error) return data.error;
     if (trips.length === 0) {
+      if (from || to) {
+        return `No trips in ${rangeLabel}. Try All time or another date. We keep the last ${data?.stored ?? 800} stored trips.`;
+      }
       return "No trips yet. Trips start when a truck becomes FILLED at a loading bay, and close when it leaves a factory.";
     }
     return null;
-  }, [loading, data?.error, trips.length]);
+  }, [loading, data?.error, data?.stored, trips.length, from, to, rangeLabel]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--gg-bg)]">
       <div className="shrink-0 border-b border-[var(--gg-line)] bg-[var(--gg-surface)] px-3 py-2 lg:px-4">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:gap-3">
-          <div className="grid flex-1 grid-cols-3 gap-1">
-            <div className="rounded-lg bg-[#fde68a] px-2 py-1.5 text-center text-black">
-              <div className="text-base font-semibold tabular-nums">
-                {counts.inTransit}
+          <div className="min-w-0 flex-1">
+            <div className="grid grid-cols-3 gap-1">
+              <div className="rounded-lg bg-[#fde68a] px-2 py-1.5 text-center text-black">
+                <div className="text-base font-semibold tabular-nums">
+                  {counts.inTransit}
+                </div>
+                <div className="text-[10px] font-medium">In transit</div>
+                <div className="text-[9px] opacity-70">filled, on road</div>
               </div>
-              <div className="text-[10px] font-medium">In transit</div>
-              <div className="text-[9px] opacity-70">= Filled road</div>
-            </div>
-            <div className="rounded-lg bg-[#2dd4bf] px-2 py-1.5 text-center text-black">
-              <div className="text-base font-semibold tabular-nums">
-                {counts.atFactory}
+              <div className="rounded-lg bg-[#2dd4bf] px-2 py-1.5 text-center text-black">
+                <div className="text-base font-semibold tabular-nums">
+                  {counts.atFactory}
+                </div>
+                <div className="text-[10px] font-medium">At factory</div>
+                <div className="text-[9px] opacity-70">still at plant</div>
               </div>
-              <div className="text-[10px] font-medium">At factory</div>
-              <div className="text-[9px] opacity-70">= Factory tile</div>
-            </div>
-            <div className="rounded-lg bg-[#00B386] px-2 py-1.5 text-center text-black">
-              <div className="text-base font-semibold tabular-nums">
-                {counts.delivered}
+              <div className="rounded-lg bg-[#00B386] px-2 py-1.5 text-center text-black">
+                <div className="text-base font-semibold tabular-nums">
+                  {counts.delivered}
+                </div>
+                <div className="text-[10px] font-medium">Delivered</div>
+                <div className="text-[9px] opacity-70">left factory</div>
               </div>
-              <div className="text-[10px] font-medium">Delivered</div>
-              <div className="text-[9px] opacity-70">left factory</div>
             </div>
+            <p className="mt-1 text-[11px] text-[var(--gg-muted)]">
+              {data?.stored != null ? `${data.stored} stored trips` : ""}
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-1.5">
@@ -189,6 +240,13 @@ export default function TripsPage() {
                 </button>
               ))}
             </div>
+            <DateRangeFilter
+              preset={preset}
+              from={from}
+              to={to}
+              onPreset={applyPreset}
+              onCustom={applyCustom}
+            />
             <input
               value={plate}
               onChange={(e) => setPlate(e.target.value)}
