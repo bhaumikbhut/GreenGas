@@ -566,8 +566,8 @@ assert(
 );
 const mundraMokha = LOADING_POINTS.find((p) => p.id === "mundra-mokha-parking")!;
 assert(
-  Boolean(mundraMokha.polygon) && (mundraMokha.polygon?.length ?? 0) === 3,
-  "Mokha parking is the 3-corner Google Maps outline",
+  Boolean(mundraMokha.polygon) && (mundraMokha.polygon?.length ?? 0) === 4,
+  "Mokha parking is the 4-corner Google Maps outline",
 );
 assert(
   Boolean(mundraMokha.polygon) &&

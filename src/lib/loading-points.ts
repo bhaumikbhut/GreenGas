@@ -201,9 +201,10 @@ const MUNDRA_CT4_PARKING_NAME = "Mundra Adani CT 4 Parking";
  * GPS inside this outline is PARK.
  */
 export const MUNDRA_MOKHA_PARK_POLYGON: FencePolygon = [
-  [22.925847, 69.792144],
-  [22.923376, 69.793099],
-  [22.923481, 69.789916],
+  [22.925993, 69.792409],
+  [22.923878, 69.794233],
+  [22.922663, 69.792066],
+  [22.923414, 69.789695],
 ];
 
 const MUNDRA_MOKHA_PARK_CENTER = {
