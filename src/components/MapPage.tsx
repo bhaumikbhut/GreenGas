@@ -1,7 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { secondaryLine, useFleet } from "@/components/FleetProvider";
+import type { TruckSnapshot } from "@/app/api/trucks/route";
+import { matchTrucksByPlate, normalizePlate } from "@/lib/plate";
 import { statusBadge } from "@/lib/status-label";
 
 const TruckMap = dynamic(() => import("@/components/TruckMap"), {
@@ -30,12 +33,53 @@ export default function MapPage() {
     loadingFilter,
     loadingOptions,
     loadingCounts,
+    productFilter,
     setParkingFilter,
     setLoadingFilter,
     setStatusFilter,
+    setProductFilter,
     setSelectedImei,
     selectTruck,
   } = useFleet();
+
+  const [plateQuery, setPlateQuery] = useState("");
+  const [plateOpen, setPlateOpen] = useState(false);
+  const lastAutoImei = useRef<string | null>(null);
+
+  const plateMatches = useMemo(
+    () => matchTrucksByPlate(trucks, plateQuery),
+    [trucks, plateQuery],
+  );
+
+  const goToTruck = (t: TruckSnapshot) => {
+    setParkingFilter("ALL");
+    setLoadingFilter("ALL");
+    setStatusFilter("ALL");
+    if (productFilter !== "ALL" && t.productLine !== productFilter) {
+      setProductFilter("ALL");
+    }
+    selectTruck(t.imei);
+    setPlateQuery(t.plate);
+    setPlateOpen(false);
+  };
+
+  useEffect(() => {
+    const compact = normalizePlate(plateQuery);
+    if (compact.length < 4) {
+      lastAutoImei.current = null;
+      return;
+    }
+    if (plateMatches.length !== 1) {
+      lastAutoImei.current = null;
+      return;
+    }
+    const hit = plateMatches[0];
+    if (lastAutoImei.current === hit.imei) return;
+    lastAutoImei.current = hit.imei;
+    goToTruck(hit);
+    // goToTruck is stable enough for this search jump; avoid re-flying on GPS ticks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plateQuery, plateMatches]);
 
   const allPoints = data?.loadingPoints ?? [];
   const yardFocus = parkingFilter !== "ALL" || loadingFilter !== "ALL";
@@ -86,7 +130,74 @@ export default function MapPage() {
         />
       </div>
 
-      <div className="pointer-events-auto absolute left-14 top-3 z-[1000] flex max-w-[calc(100%-11rem)] flex-col gap-1.5 sm:max-w-none sm:flex-row">
+      <div className="pointer-events-auto absolute left-14 top-3 z-[1000] flex max-w-[calc(100%-11rem)] flex-col gap-1.5 sm:max-w-none sm:flex-row sm:items-start">
+        <div className="relative min-w-[9.5rem] sm:w-[13.5rem]">
+          <input
+            value={plateQuery}
+            onChange={(e) => {
+              setPlateQuery(e.target.value);
+              setPlateOpen(true);
+            }}
+            onFocus={() => setPlateOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setPlateOpen(false);
+                return;
+              }
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              if (plateMatches[0]) goToTruck(plateMatches[0]);
+            }}
+            placeholder="Truck number"
+            aria-label="Search truck number"
+            enterKeyHint="search"
+            autoCapitalize="characters"
+            autoComplete="off"
+            spellCheck={false}
+            className={yardSelectClass + " w-full pr-7"}
+          />
+          {plateQuery ? (
+            <button
+              type="button"
+              onClick={() => {
+                setPlateQuery("");
+                setPlateOpen(false);
+                lastAutoImei.current = null;
+              }}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1 text-[10px] text-[var(--gg-muted)]"
+              aria-label="Clear truck search"
+            >
+              ✕
+            </button>
+          ) : null}
+          {plateOpen && plateQuery.trim() ? (
+            <ul className="absolute left-0 right-0 top-full z-[1001] mt-1 max-h-56 overflow-auto rounded-lg border border-black/10 bg-white py-1 text-xs shadow-lg">
+              {plateMatches.length === 0 ? (
+                <li className="px-2.5 py-2 text-[var(--gg-muted)]">
+                  No truck matches
+                </li>
+              ) : (
+                plateMatches.slice(0, 8).map((t) => (
+                  <li key={t.imei}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => goToTruck(t)}
+                      className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left hover:bg-[#eef3ee]"
+                    >
+                      <span className="truncate font-semibold tracking-wide">
+                        {t.plate}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-[var(--gg-muted)]">
+                        {statusBadge(t.status)}
+                      </span>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          ) : null}
+        </div>
         <select
           value={parkingFilter}
           onChange={(e) => {

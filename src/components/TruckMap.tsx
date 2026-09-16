@@ -279,6 +279,8 @@ function FitBounds({
 
   useEffect(() => {
     const yardFocus = Boolean(fitKey);
+    // Pin search / card pick: FocusTruck owns the camera. Don't refit the fleet.
+    if (selectedImei && !yardFocus) return;
     // Don't steal the camera while a truck is selected, unless the yard filter just changed.
     if (selectedImei && lastFitKey.current === fitKey) return;
 

@@ -150,13 +150,18 @@ export default function FleetPage() {
             ) : null}
 
             <label className="relative min-w-[9rem] flex-1 lg:max-w-[14rem] lg:flex-none">
-              <span className="sr-only">Search plate</span>
+              <span className="sr-only">Search truck number</span>
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Plate"
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  if (filtered.length === 1) openOnMap(filtered[0].imei);
+                }}
+                placeholder="Truck number"
                 enterKeyHint="search"
                 autoCapitalize="characters"
+                autoComplete="off"
                 className="w-full rounded-lg border border-[var(--gg-line)] bg-[var(--gg-bg)] py-1.5 pl-2 pr-8 text-sm outline-none placeholder:text-[#8a988c] focus:border-[var(--gg-green)]"
               />
               {query ? (

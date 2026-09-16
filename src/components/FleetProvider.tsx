@@ -19,6 +19,7 @@ import {
   canonicalLoadingName,
   type LoadingPoint,
 } from "@/lib/loading-points";
+import { plateMatches } from "@/lib/plate";
 
 export type FleetApiResponse = {
   ok: boolean;
@@ -342,7 +343,7 @@ export function FleetProvider({ children }: { children: ReactNode }) {
         return false;
       if (!q) return true;
       return (
-        t.plate.toLowerCase().includes(q) ||
+        plateMatches(t.plate, q) ||
         t.name.toLowerCase().includes(q) ||
         t.productLine.toLowerCase().includes(q)
       );
@@ -420,7 +421,7 @@ export function FleetProvider({ children }: { children: ReactNode }) {
       const q = query.trim().toLowerCase();
       if (!q) return true;
       return (
-        t.plate.toLowerCase().includes(q) ||
+        plateMatches(t.plate, q) ||
         t.name.toLowerCase().includes(q) ||
         t.productLine.toLowerCase().includes(q)
       );
