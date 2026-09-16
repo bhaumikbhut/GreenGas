@@ -2,6 +2,7 @@ import { FACTORY_POINTS, type FactoryPoint } from "./factory-points";
 import {
   PORT_LOADING_POINTS,
   PARKING_POINTS,
+  type FenceBox,
   type LoadingPoint,
 } from "./loading-points";
 
@@ -13,7 +14,7 @@ import {
  *   LOADING → leave loading      → LOADED (filled)
  *   LOADED → enter factory pin   → AT_FACTORY
  *   AT_FACTORY → leave factory   → ON_ROAD (empty) + lastFactory
- *   LOADED → re-enter other bay  → LOADING (next trip)
+ *   LOADED → re-enter loading    → LOADING (at the bay now)
  *
  * Factory enter: painted circle while moving; nearest pin within 320 m when
  * stopped (gate GPS). No "Unknown factory". Highway rest is not a factory.
@@ -65,6 +66,150 @@ export function haversineMeters(
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(a));
 }
 
+function toRad(d: number): number {
+  return (d * Math.PI) / 180;
+}
+
+function toDeg(r: number): number {
+  return (r * 180) / Math.PI;
+}
+
+export function localMetersInBox(
+  lat: number,
+  lng: number,
+  box: FenceBox,
+): { alongM: number; acrossM: number } {
+  const dLat = toRad(lat - box.lat);
+  const dLng = toRad(lng - box.lng);
+  const northM = dLat * EARTH_RADIUS_M;
+  const eastM = dLng * EARTH_RADIUS_M * Math.cos(toRad(box.lat));
+  const h = toRad(box.headingDeg);
+  return {
+    alongM: northM * Math.cos(h) + eastM * Math.sin(h),
+    acrossM: -northM * Math.sin(h) + eastM * Math.cos(h),
+  };
+}
+
+export function pointInFenceBox(
+  lat: number,
+  lng: number,
+  box: FenceBox,
+): boolean {
+  const { alongM, acrossM } = localMetersInBox(lat, lng, box);
+  return (
+    Math.abs(alongM) <= box.lengthM / 2 && Math.abs(acrossM) <= box.widthM / 2
+  );
+}
+
+/** Even-odd ray cast. `ring` is [lat, lng] vertices (need not be closed). */
+export function pointInFencePolygon(
+  lat: number,
+  lng: number,
+  ring: Array<[number, number]>,
+): boolean {
+  if (ring.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const yi = ring[i][0];
+    const xi = ring[i][1];
+    const yj = ring[j][0];
+    const xj = ring[j][1];
+    if (yi === yj) continue;
+    const intersects =
+      yi > lat !== yj > lat &&
+      lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+export function hasYardOutline(point: LoadingPoint): boolean {
+  return Boolean(
+    (point.polygon && point.polygon.length >= 3) || point.box,
+  );
+}
+
+export function pointInsideLoadingPoint(
+  lat: number,
+  lng: number,
+  point: LoadingPoint,
+): boolean {
+  if (point.polygon && point.polygon.length >= 3) {
+    return pointInFencePolygon(lat, lng, point.polygon);
+  }
+  if (point.box) return pointInFenceBox(lat, lng, point.box);
+  const r = point.radiusM > 0 ? point.radiusM : 50;
+  return haversineMeters(lat, lng, point.lat, point.lng) <= r;
+}
+
+/** Outline to draw on the map: measured polygon, else fitted box corners. */
+export function fenceOutline(
+  point: LoadingPoint,
+): [number, number][] | null {
+  if (point.polygon && point.polygon.length >= 3) return point.polygon;
+  if (point.box) return fenceBoxCorners(point.box);
+  return null;
+}
+
+/** Four corners [lat, lng] for map polygons. */
+export function fenceBoxCorners(box: FenceBox): [number, number][] {
+  const h = toRad(box.headingDeg);
+  const cosH = Math.cos(h);
+  const sinH = Math.sin(h);
+  const halfL = box.lengthM / 2;
+  const halfW = box.widthM / 2;
+  const signs: Array<[number, number]> = [
+    [1, 1],
+    [1, -1],
+    [-1, -1],
+    [-1, 1],
+  ];
+  return signs.map(([sL, sW]) => {
+    const northM = sL * halfL * cosH - sW * halfW * sinH;
+    const eastM = sL * halfL * sinH + sW * halfW * cosH;
+    const lat = box.lat + toDeg(northM / EARTH_RADIUS_M);
+    const lng =
+      box.lng + toDeg(eastM / (EARTH_RADIUS_M * Math.cos(toRad(box.lat))));
+    return [lat, lng];
+  });
+}
+
+export function uniqueBoxedPoints(points: LoadingPoint[]): LoadingPoint[] {
+  const seen = new Set<string>();
+  const out: LoadingPoint[] = [];
+  for (const p of points) {
+    if (!fenceOutline(p)) continue;
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    out.push(p);
+  }
+  return out;
+}
+
+/** Group Mundra / IOCL / Aegis Kandla / Dahej so parking matches the fill yard. */
+export function loadingFacilityKey(
+  name: string | null | undefined,
+): string | null {
+  if (!name) return null;
+  const n = name.toUpperCase();
+  if (n.includes("IOCL")) return "KANDLA-IOCL";
+  if (n.includes("AEGIS") && n.includes("KANDLA")) return "KANDLA-AEGIS";
+  if (n.includes("PIPAVAV") || n.includes("SHREJI")) return "PIPAVAV";
+  if (n.includes("MUNDRA")) return "MUNDRA";
+  if (n.includes("DAHEJ")) return "DAHEJ";
+  if (n.includes("PORBANDAR") || n.includes("CONFIDENCE")) return "PORBANDAR";
+  return n;
+}
+
+export function samePortFacility(
+  parking: LoadingPoint,
+  lastLoadedFrom: string | null | undefined,
+): boolean {
+  const a = loadingFacilityKey(parking.name);
+  const b = loadingFacilityKey(lastLoadedFrom);
+  return Boolean(a && b && a === b);
+}
+
 function nearestWithOwnRadius(
   points: LoadingPoint[],
   lat: number,
@@ -72,9 +217,9 @@ function nearestWithOwnRadius(
 ): { point: LoadingPoint; distanceM: number } | null {
   let best: { point: LoadingPoint; distanceM: number } | null = null;
   for (const point of points) {
-    const r = point.radiusM > 0 ? point.radiusM : 50;
     const distanceM = haversineMeters(lat, lng, point.lat, point.lng);
-    if (distanceM <= r && (!best || distanceM < best.distanceM)) {
+    const inside = pointInsideLoadingPoint(lat, lng, point);
+    if (inside && (!best || distanceM < best.distanceM)) {
       best = { point, distanceM };
     }
   }
@@ -169,8 +314,10 @@ export function normalizeMemory(
       ? prev.cargo
       : "EMPTY";
 
-  if (raw === "OFFLINE") status = "OFFLINE";
-  else if (raw === "PARK" || raw === "PARKING") {
+  if (raw === "OFFLINE") {
+    // Legacy GPS-offline flag — keep last cargo, not a fleet status.
+    status = cargo === "LOADED" ? "LOADED" : "ON_ROAD";
+  } else if (raw === "PARK" || raw === "PARKING") {
     status = "PARK";
     cargo = "EMPTY";
   } else if (raw === "LOADING") status = "LOADING";
@@ -262,15 +409,6 @@ export function nextStatus(params: {
     lastPark: prev.lastPark ?? null,
   };
 
-  if (!params.online) {
-    return {
-      ...prev,
-      ...base,
-      status: "OFFLINE",
-      // Keep outsideStreak so leave-loading progress survives brief GPS drops.
-    };
-  }
-
   const loadingIds = new Set(PORT_LOADING_POINTS.map((p) => p.id));
   const parkingIds = new Set(PARKING_POINTS.map((p) => p.id));
 
@@ -293,13 +431,14 @@ export function nextStatus(params: {
 
   // --- Filled truck ---
   if (isFilled) {
-    // Next trip at a *different* loading bay → start LOADING again.
-    // Same bay while still LOADED = still at origin port (jitter / waiting) — keep LOADED.
+    // Circle loading bays: stay LOADED if GPS is still on the same pin (jitter).
+    // Outlined loading yards: GPS inside the outline is LOADING.
     if (params.insideLoading) {
       const sameBay =
         prev.lastLoadedFrom != null &&
         prev.lastLoadedFrom === params.insideLoading.point.name;
-      if (sameBay) {
+      // Accurate outline: GPS inside the loading yard is LOADING (not filled-wait).
+      if (sameBay && !hasYardOutline(params.insideLoading.point)) {
         return {
           ...base,
           status: "LOADED",
@@ -368,6 +507,26 @@ export function nextStatus(params: {
         status: "AT_FACTORY",
         cargo: "LOADED",
         outsideStreak: outsideFactoryStreak,
+      };
+    }
+
+    // Outlined yards (IOCL parking): GPS inside the outline is PARK, even after a fill.
+    // Other parking: only empty the truck when it is a *different* port.
+    if (
+      params.insideParking &&
+      (hasYardOutline(params.insideParking.point) ||
+        !samePortFacility(params.insideParking.point, prev.lastLoadedFrom))
+    ) {
+      return {
+        ...base,
+        status: "PARK",
+        geofenceId: params.insideParking.point.id,
+        geofenceKind: "parking",
+        enteredAt: now,
+        outsideStreak: 0,
+        cargo: "EMPTY",
+        lastLoadedFrom: null,
+        lastPark: params.insideParking.point.name,
       };
     }
 

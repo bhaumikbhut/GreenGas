@@ -19,7 +19,7 @@ export type { TruckSnapshot, FleetSnapshot };
 /**
  * Merge legacy EMPTY into ON_ROAD (keep lastFactory for “left factory” line).
  */
-function healLegacyEmpty(snapshot: FleetSnapshot): FleetSnapshot {
+function remapLegacyEmpty(snapshot: FleetSnapshot): FleetSnapshot {
   let changed = false;
   const trucks = snapshot.trucks.map((t) => {
     if (t.status === "EMPTY") {
@@ -80,11 +80,11 @@ function filterSnapshot(
   snapshot: FleetSnapshot,
   imeiFilter: string | null,
 ): FleetSnapshot {
-  const healed = healLegacyEmpty(snapshot);
-  if (!imeiFilter) return healed;
-  const trucks = healed.trucks.filter((t) => t.imei === imeiFilter);
+  const remapped = remapLegacyEmpty(snapshot);
+  if (!imeiFilter) return remapped;
+  const trucks = remapped.trucks.filter((t) => t.imei === imeiFilter);
   return {
-    ...healed,
+    ...remapped,
     trucks,
     truckCount: trucks.length,
     loadingPoints: [],

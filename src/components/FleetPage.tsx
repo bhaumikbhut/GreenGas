@@ -21,11 +21,15 @@ export default function FleetPage() {
     parkingFilter,
     parkingOptions,
     parkingCounts,
+    loadingFilter,
+    loadingOptions,
+    loadingCounts,
     productCounts,
     setQuery,
     setStatusFilter,
     setProductFilter,
     setParkingFilter,
+    setLoadingFilter,
     selectTruck,
   } = useFleet();
 
@@ -39,7 +43,7 @@ export default function FleetPage() {
       {/* Compact toolbar — keeps TV / large screens list-first */}
       <div className="shrink-0 border-b border-[var(--gg-line)] bg-[var(--gg-surface)] px-3 py-2 lg:px-4">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
-          <div className="grid min-w-0 flex-1 grid-cols-3 gap-1 sm:grid-cols-6">
+          <div className="grid min-w-0 flex-1 grid-cols-3 gap-1 sm:grid-cols-5">
             {(
               [
                 ["PARK", counts.PARK],
@@ -47,7 +51,6 @@ export default function FleetPage() {
                 ["LOADED", counts.LOADED],
                 ["AT_FACTORY", counts.AT_FACTORY],
                 ["ON_ROAD", counts.ON_ROAD],
-                ["OFFLINE", counts.OFFLINE],
               ] as const
             ).map(([key, value]) => {
               const meta = STATUS_META[key];
@@ -60,6 +63,7 @@ export default function FleetPage() {
                     setStatusFilter((s) => {
                       const next = s === key ? "ALL" : key;
                       if (next !== "PARK") setParkingFilter("ALL");
+                      if (next !== "LOADING") setLoadingFilter("ALL");
                       return next;
                     })
                   }
@@ -123,6 +127,23 @@ export default function FleetPage() {
                   <option key={name} value={name}>
                     {name}
                     {parkingCounts[name] ? ` (${parkingCounts[name]})` : ""}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+
+            {statusFilter === "LOADING" ? (
+              <select
+                value={loadingFilter}
+                onChange={(e) => setLoadingFilter(e.target.value)}
+                aria-label="Loading location"
+                className="max-w-[min(100%,280px)] appearance-none rounded-lg border border-[var(--gg-line)] bg-[var(--gg-bg)] py-1.5 pl-2 pr-7 text-xs outline-none focus:border-[var(--gg-green)]"
+              >
+                <option value="ALL">All loading</option>
+                {loadingOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                    {loadingCounts[name] ? ` (${loadingCounts[name]})` : ""}
                   </option>
                 ))}
               </select>

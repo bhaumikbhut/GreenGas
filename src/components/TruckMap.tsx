@@ -1,11 +1,12 @@
 "use client";
 
-import { MapContainer, TileLayer, Circle, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Circle, Marker, Polygon, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { TruckSnapshot } from "@/app/api/trucks/route";
 import type { FactoryPoint } from "@/lib/factory-points";
 import type { LoadingPoint } from "@/lib/loading-points";
+import { fenceOutline, uniqueBoxedPoints } from "@/lib/geofence";
 
 type Basemap = "street" | "satellite";
 
@@ -31,7 +32,6 @@ function statusColor(status: string): string {
   if (status === "AT_FACTORY") return "#2dd4bf"; // teal
   if (status === "EMPTY") return "#eab308"; // yellow
   if (status === "ON_ROAD") return "#fde68a"; // light amber
-  if (status === "OFFLINE") return "#9ca3af"; // gray
   return "#1d4f91";
 }
 
@@ -143,13 +143,18 @@ function MovingTruckMarker({
   const metaRef = useRef({
     speed: truck.speed,
     course: truck.course,
+    gpstime: truck.gpstime,
   });
   const [iconTick, setIconTick] = useState(0);
 
   useEffect(() => {
     if (truck.lat == null || truck.lng == null) return;
     targetRef.current = { lat: truck.lat, lng: truck.lng };
-    metaRef.current = { speed: truck.speed, course: truck.course };
+    metaRef.current = {
+      speed: truck.speed,
+      course: truck.course,
+      gpstime: truck.gpstime,
+    };
     if (!displayRef.current) {
       displayRef.current = { lat: truck.lat, lng: truck.lng };
       markerRef.current?.setLatLng([truck.lat, truck.lng]);
@@ -177,15 +182,17 @@ function MovingTruckMarker({
         let lat = cur.lat + dlat * alpha;
         let lng = cur.lng + dlng * alpha;
 
-        const { speed, course } = metaRef.current;
-        if (speed > 5 && distM < 45) {
+        const { speed, course, gpstime } = metaRef.current;
+        const gpsAgeMs = gpstime ? Date.now() - gpstime : Number.POSITIVE_INFINITY;
+        // Crawl only between fresh polls. Never move the GPS target —
+        // that left stopped trucks sitting off the real pin.
+        if (speed > 5 && distM < 45 && gpsAgeMs < 45_000) {
           const meters = ((speed * 1000) / 3600) * dt;
           const rad = (course * Math.PI) / 180;
           lat += (meters / 111_000) * Math.cos(rad);
           lng +=
             (meters / (111_000 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)))) *
             Math.sin(rad);
-          targetRef.current = { lat, lng };
         }
 
         displayRef.current = { lat, lng };
@@ -454,7 +461,39 @@ export default function TruckMap({
           focusToken={focusToken}
           mode={mode}
         />
+        {uniqueBoxedPoints(loadingPoints).map((p) => {
+          const isParking = p.kind === "parking";
+          const color = isParking ? "#a16207" : "#1f7a4d";
+          const outline = fenceOutline(p);
+          if (!outline) return null;
+          const label = p.polygon
+            ? `${p.polygon.length} corner outline`
+            : p.box
+              ? `${Math.round(p.box.lengthM)} × ${Math.round(p.box.widthM)} m box`
+              : "";
+          return (
+            <Polygon
+              key={`box-${p.id}`}
+              positions={outline}
+              pathOptions={{
+                color,
+                fillColor: color,
+                fillOpacity: 0.16,
+                weight: 2,
+              }}
+            >
+              <Popup>
+                <strong>{p.name}</strong>
+                <br />
+                {isParking ? "Parking" : "Loading"} · {p.port}
+                <br />
+                {label}
+              </Popup>
+            </Polygon>
+          );
+        })}
         {loadingPoints.map((p) => {
+        if (fenceOutline(p)) return null;
         const isParking = p.kind === "parking";
         const color = isParking ? "#a16207" : "#1f7a4d";
         const r = p.radiusM > 0 ? p.radiusM : radiusM;

@@ -32,23 +32,26 @@ async function main() {
     nextStatus,
     normalizeMemory,
   } = await import("../src/lib/geofence");
-  const { readFleetSnapshot, writeFleetSnapshot } = await import(
-    "../src/lib/fleet-cache"
-  );
+  const { readFleetSnapshot, writeFleetSnapshot, releaseRefreshLock } =
+    await import("../src/lib/fleet-cache");
   const { readTruckStore, writeTruckStore } = await import(
     "../src/lib/status-store"
   );
   const { reconcileTripsFromFleet, scrubUnknownFactoryFromTrips } =
     await import("../src/lib/trips");
-  const { refreshFleetLiveGps } = await import("../src/lib/refresh-fleet");
+  const { buildFleetSnapshot } = await import("../src/lib/build-fleet");
 
   if (!skipRefresh) {
     console.error("Refreshing live GPS…");
-    const r = await refreshFleetLiveGps();
+    await releaseRefreshLock();
+    const snapshot = await buildFleetSnapshot({ skipAlerts: true });
+    if (snapshot.trucks.length > 0) {
+      await writeFleetSnapshot(snapshot);
+    }
     console.error("refresh", {
-      skipped: r.skipped,
-      trucks: r.snapshot?.trucks?.length ?? 0,
-      counts: r.snapshot?.statusCounts,
+      trucks: snapshot.trucks.length,
+      counts: snapshot.statusCounts,
+      fetchedAt: snapshot.fetchedAt,
     });
   }
 
@@ -73,7 +76,7 @@ async function main() {
       unknownCleared += 1;
     }
 
-    if (t.lat == null || t.lng == null || !t.online) {
+    if (t.lat == null || t.lng == null) {
       // Still scrub unknown labels on offline trucks.
       if (mem.lastFactory?.toLowerCase() === "unknown factory") {
         mem = { ...mem, lastFactory: null };
