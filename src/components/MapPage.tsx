@@ -13,6 +13,9 @@ const TruckMap = dynamic(() => import("@/components/TruckMap"), {
   ),
 });
 
+const yardSelectClass =
+  "max-w-[min(100%,240px)] appearance-none rounded-lg border border-black/10 bg-white/95 py-1.5 pl-2 pr-7 text-xs shadow-md outline-none backdrop-blur focus:border-[var(--gg-green)]";
+
 export default function MapPage() {
   const {
     data,
@@ -21,9 +24,35 @@ export default function MapPage() {
     selected,
     selectedImei,
     focusToken,
+    parkingFilter,
+    parkingOptions,
+    parkingCounts,
+    loadingFilter,
+    loadingOptions,
+    loadingCounts,
+    setParkingFilter,
+    setLoadingFilter,
+    setStatusFilter,
     setSelectedImei,
     selectTruck,
   } = useFleet();
+
+  const allPoints = data?.loadingPoints ?? [];
+  const yardFocus = parkingFilter !== "ALL" || loadingFilter !== "ALL";
+  const mapPoints = yardFocus
+    ? allPoints.filter((p) =>
+        parkingFilter !== "ALL"
+          ? p.kind === "parking" && p.name === parkingFilter
+          : p.kind === "loading" && p.name === loadingFilter,
+      )
+    : allPoints;
+  const mapFactories = yardFocus ? [] : (data?.factoryPoints ?? []);
+  const fitKey =
+    parkingFilter !== "ALL"
+      ? `p:${parkingFilter}`
+      : loadingFilter !== "ALL"
+        ? `l:${loadingFilter}`
+        : "";
 
   /** Keep the selected truck on the map even if filters would hide it. */
   const mapTrucks = (() => {
@@ -32,22 +61,80 @@ export default function MapPage() {
     return [...filtered, selected];
   })();
 
-  // Prefer full fleet lookup if filtered list is empty but we have a selection.
-  const focusList =
-    mapTrucks.length > 0 ? mapTrucks : selected ? [selected] : trucks;
+  // Yard filter: never fall back to the whole fleet (that keeps Gujarat zoom).
+  // Otherwise, keep a selected pin visible even if the list is empty.
+  const focusList = yardFocus
+    ? mapTrucks
+    : mapTrucks.length > 0
+      ? mapTrucks
+      : selected
+        ? [selected]
+        : trucks;
 
   return (
     <div className="relative h-full min-h-0 w-full">
       <div className="absolute inset-0">
         <TruckMap
           trucks={focusList}
-          loadingPoints={data?.loadingPoints ?? []}
-          factoryPoints={data?.factoryPoints ?? []}
+          loadingPoints={mapPoints}
+          factoryPoints={mapFactories}
           radiusM={data?.radiusM ?? 500}
           selectedImei={selectedImei}
           focusToken={focusToken}
           onSelectImei={(imei) => selectTruck(imei)}
+          fitKey={fitKey}
         />
+      </div>
+
+      <div className="pointer-events-auto absolute left-14 top-3 z-[1000] flex max-w-[calc(100%-11rem)] flex-col gap-1.5 sm:max-w-none sm:flex-row">
+        <select
+          value={parkingFilter}
+          onChange={(e) => {
+            const name = e.target.value;
+            setSelectedImei(null);
+            setParkingFilter(name);
+            if (name === "ALL") {
+              if (loadingFilter === "ALL") setStatusFilter("ALL");
+            } else {
+              setLoadingFilter("ALL");
+              setStatusFilter("PARK");
+            }
+          }}
+          aria-label="Parking location"
+          className={yardSelectClass}
+        >
+          <option value="ALL">All parking</option>
+          {parkingOptions.map((name) => (
+            <option key={name} value={name}>
+              {name}
+              {parkingCounts[name] ? ` (${parkingCounts[name]})` : ""}
+            </option>
+          ))}
+        </select>
+        <select
+          value={loadingFilter}
+          onChange={(e) => {
+            const name = e.target.value;
+            setSelectedImei(null);
+            setLoadingFilter(name);
+            if (name === "ALL") {
+              if (parkingFilter === "ALL") setStatusFilter("ALL");
+            } else {
+              setParkingFilter("ALL");
+              setStatusFilter("LOADING");
+            }
+          }}
+          aria-label="Loading location"
+          className={yardSelectClass}
+        >
+          <option value="ALL">All loading</option>
+          {loadingOptions.map((name) => (
+            <option key={name} value={name}>
+              {name}
+              {loadingCounts[name] ? ` (${loadingCounts[name]})` : ""}
+            </option>
+          ))}
+        </select>
       </div>
 
       {selected ? (

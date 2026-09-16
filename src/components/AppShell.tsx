@@ -60,7 +60,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               ) : null}
               <span className="mx-1.5 text-white/30">·</span>
               Updated {updatedLabel}
-              {onFleet &&
+              {(onFleet || onMap) &&
               (statusFilter !== "ALL" ||
                 productFilter !== "ALL" ||
                 filtered.length !== productScoped) ? (

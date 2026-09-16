@@ -23,6 +23,8 @@ type Props = {
   /** Initial basemap; user can still toggle on the map. */
   defaultBasemap?: Basemap;
   onSelectImei?: (imei: string) => void;
+  /** Change this to refit the camera (parking / loading yard filter). */
+  fitKey?: string;
 };
 
 function statusColor(status: string): string {
@@ -245,62 +247,114 @@ function MovingTruckMarker({
   );
 }
 
+function yardCameraPoints(points: LoadingPoint[]): [number, number][] {
+  const pts: [number, number][] = [];
+  for (const p of points) {
+    const outline = fenceOutline(p);
+    if (outline && outline.length >= 3) {
+      for (const pt of outline) pts.push(pt);
+    } else if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
+      pts.push([p.lat, p.lng]);
+    }
+  }
+  return pts;
+}
+
 function FitBounds({
   trucks,
   loadingPoints,
   factoryPoints,
   selectedImei,
+  fitKey = "",
 }: {
   trucks: TruckSnapshot[];
   loadingPoints: LoadingPoint[];
   factoryPoints: FactoryPoint[];
   selectedImei: string | null;
+  fitKey?: string;
 }) {
   const map = useMap();
   const didFit = useRef(false);
+  const lastFitKey = useRef<string | null>(null);
 
   useEffect(() => {
-    // Don't steal the camera while a truck is selected
-    if (selectedImei) return;
+    const yardFocus = Boolean(fitKey);
+    // Don't steal the camera while a truck is selected, unless the yard filter just changed.
+    if (selectedImei && lastFitKey.current === fitKey) return;
 
-    const size = map.getSize();
-    if (!size.x || !size.y) return;
+    const apply = () => {
+      if (lastFitKey.current === fitKey && didFit.current) return true;
+      map.invalidateSize({ animate: false });
+      const size = map.getSize();
+      if (!size.x || !size.y) return false;
 
-    try {
-      const pts: [number, number][] = [];
-      for (const t of trucks) {
-        if (
-          t.lat != null &&
-          t.lng != null &&
-          Number.isFinite(t.lat) &&
-          Number.isFinite(t.lng)
-        ) {
-          pts.push([t.lat, t.lng]);
+      try {
+        if (yardFocus) {
+          const yardPts = yardCameraPoints(loadingPoints);
+          if (yardPts.length === 0) return false;
+          if (yardPts.length === 1) {
+            map.flyTo(yardPts[0], 16, { duration: 0.75 });
+          } else {
+            map.flyToBounds(yardPts, {
+              padding: [56, 56],
+              maxZoom: 17,
+              duration: 0.75,
+            });
+          }
+          didFit.current = true;
+          lastFitKey.current = fitKey;
+          return true;
         }
-      }
-      for (const p of loadingPoints) {
-        if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
-          pts.push([p.lat, p.lng]);
+
+        const pts: [number, number][] = [];
+        for (const t of trucks) {
+          if (
+            t.lat != null &&
+            t.lng != null &&
+            Number.isFinite(t.lat) &&
+            Number.isFinite(t.lng)
+          ) {
+            pts.push([t.lat, t.lng]);
+          }
         }
-      }
-      for (const p of factoryPoints) {
-        if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
-          pts.push([p.lat, p.lng]);
+        for (const p of loadingPoints) {
+          if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
+            pts.push([p.lat, p.lng]);
+          }
         }
-      }
-      if (pts.length === 0) {
-        map.setView([22.0, 71.0], 7);
-        return;
-      }
-      // Fit fleet once on first load; later polls keep current view
-      if (!didFit.current) {
-        map.fitBounds(pts, { padding: [40, 40], maxZoom: 11 });
+        for (const p of factoryPoints) {
+          if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
+            pts.push([p.lat, p.lng]);
+          }
+        }
+        if (pts.length === 0) {
+          map.setView([22.0, 71.0], 7);
+          didFit.current = true;
+          lastFitKey.current = fitKey;
+          return true;
+        }
+        map.fitBounds(pts, {
+          padding: [48, 48],
+          maxZoom: 11,
+        });
         didFit.current = true;
+        lastFitKey.current = fitKey;
+        return true;
+      } catch {
+        return false;
       }
-    } catch {
-      // ignore
-    }
-  }, [map, trucks, loadingPoints, factoryPoints, selectedImei]);
+    };
+
+    if (apply()) return;
+    const t1 = window.setTimeout(() => apply(), 50);
+    const t2 = window.setTimeout(() => apply(), 200);
+    const t3 = window.setTimeout(() => apply(), 500);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
+    };
+  }, [map, trucks, loadingPoints, factoryPoints, selectedImei, fitKey]);
 
   return null;
 }
@@ -391,6 +445,7 @@ export default function TruckMap({
   mode = "fleet",
   defaultBasemap = "satellite",
   onSelectImei,
+  fitKey = "",
 }: Props) {
   const [basemap, setBasemap] = useState<Basemap>(defaultBasemap);
 
@@ -454,6 +509,7 @@ export default function TruckMap({
           loadingPoints={loadingPoints}
           factoryPoints={factoryPoints}
           selectedImei={selectedImei}
+          fitKey={fitKey}
         />
         <FocusTruck
           trucks={trucks}
