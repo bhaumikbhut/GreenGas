@@ -215,6 +215,150 @@ const MUNDRA_MOKHA_PARK_CENTER = {
     MUNDRA_MOKHA_PARK_POLYGON.length,
 };
 
+/**
+ * Aegis Kandla parking — Google Maps corners (clockwise from NW).
+ * GPS inside this outline is PARK.
+ */
+export const AEGIS_KANDLA_PARK_POLYGON: FencePolygon = [
+  [23.027790, 70.195616],
+  [23.027151, 70.198367],
+  [23.025856, 70.197420],
+  [23.027109, 70.195381],
+];
+
+const AEGIS_KANDLA_PARK_CENTER = {
+  lat:
+    AEGIS_KANDLA_PARK_POLYGON.reduce((s, [lat]) => s + lat, 0) /
+    AEGIS_KANDLA_PARK_POLYGON.length,
+  lng:
+    AEGIS_KANDLA_PARK_POLYGON.reduce((s, [, lng]) => s + lng, 0) /
+    AEGIS_KANDLA_PARK_POLYGON.length,
+};
+
+/**
+ * Aegis Kandla loading — Google Maps corners (clockwise from NW).
+ * One yard covering former loading points 1 and 2. GPS inside is LOADING.
+ */
+export const AEGIS_KANDLA_LOAD_POLYGON: FencePolygon = [
+  [23.029028, 70.199460],
+  [23.028643, 70.201471],
+  [23.027873, 70.201262],
+  [23.028401, 70.199277],
+];
+
+const AEGIS_KANDLA_LOAD_CENTER = {
+  lat:
+    AEGIS_KANDLA_LOAD_POLYGON.reduce((s, [lat]) => s + lat, 0) /
+    AEGIS_KANDLA_LOAD_POLYGON.length,
+  lng:
+    AEGIS_KANDLA_LOAD_POLYGON.reduce((s, [, lng]) => s + lng, 0) /
+    AEGIS_KANDLA_LOAD_POLYGON.length,
+};
+
+const AEGIS_KANDLA_LOADING_NAME = "Aegis Kandla Loading Point";
+
+/**
+ * Aegis Pipavav parking — Google Maps corners (clockwise from N).
+ * GPS inside this outline is PARK.
+ */
+export const AEGIS_PIPAVAV_PARK_POLYGON: FencePolygon = [
+  [20.936947, 71.495772],
+  [20.936429, 71.496519],
+  [20.936014, 71.496071],
+  [20.936596, 71.495292],
+];
+
+const AEGIS_PIPAVAV_PARK_CENTER = {
+  lat:
+    AEGIS_PIPAVAV_PARK_POLYGON.reduce((s, [lat]) => s + lat, 0) /
+    AEGIS_PIPAVAV_PARK_POLYGON.length,
+  lng:
+    AEGIS_PIPAVAV_PARK_POLYGON.reduce((s, [, lng]) => s + lng, 0) /
+    AEGIS_PIPAVAV_PARK_POLYGON.length,
+};
+
+/**
+ * Aegis Pipavav loading point 1 — Google Maps corners (clockwise from N).
+ * GPS inside this outline is LOADING.
+ */
+export const AEGIS_PIPAVAV_LOAD1_POLYGON: FencePolygon = [
+  [20.935431, 71.496895],
+  [20.935242, 71.497118],
+  [20.934919, 71.496772],
+  [20.935138, 71.496519],
+];
+
+const AEGIS_PIPAVAV_LOAD1_CENTER = {
+  lat:
+    AEGIS_PIPAVAV_LOAD1_POLYGON.reduce((s, [lat]) => s + lat, 0) /
+    AEGIS_PIPAVAV_LOAD1_POLYGON.length,
+  lng:
+    AEGIS_PIPAVAV_LOAD1_POLYGON.reduce((s, [, lng]) => s + lng, 0) /
+    AEGIS_PIPAVAV_LOAD1_POLYGON.length,
+};
+
+/**
+ * Aegis Pipavav loading point 2 — Google Maps corners (clockwise from N).
+ * GPS inside this outline is LOADING.
+ */
+export const AEGIS_PIPAVAV_LOAD2_POLYGON: FencePolygon = [
+  [20.936229, 71.498261],
+  [20.935863, 71.498739],
+  [20.935522, 71.498562],
+  [20.935998, 71.497966],
+];
+
+const AEGIS_PIPAVAV_LOAD2_CENTER = {
+  lat:
+    AEGIS_PIPAVAV_LOAD2_POLYGON.reduce((s, [lat]) => s + lat, 0) /
+    AEGIS_PIPAVAV_LOAD2_POLYGON.length,
+  lng:
+    AEGIS_PIPAVAV_LOAD2_POLYGON.reduce((s, [, lng]) => s + lng, 0) /
+    AEGIS_PIPAVAV_LOAD2_POLYGON.length,
+};
+
+/**
+ * Shreji parking Aegis Pipavav — Google Maps corners (clockwise from NW).
+ * GPS inside this outline is PARK.
+ */
+export const SHREJI_PIPAVAV_PARK_POLYGON: FencePolygon = [
+  [20.987817, 71.509719],
+  [20.987745, 71.511007],
+  [20.986494, 71.511365],
+  [20.986899, 71.512615],
+  [20.985396, 71.513162],
+  [20.985172, 71.510114],
+];
+
+const SHREJI_PIPAVAV_PARK_CENTER = {
+  lat:
+    SHREJI_PIPAVAV_PARK_POLYGON.reduce((s, [lat]) => s + lat, 0) /
+    SHREJI_PIPAVAV_PARK_POLYGON.length,
+  lng:
+    SHREJI_PIPAVAV_PARK_POLYGON.reduce((s, [, lng]) => s + lng, 0) /
+    SHREJI_PIPAVAV_PARK_POLYGON.length,
+};
+
+/**
+ * Porbandar Confidence — one yard for parking and loading (clockwise from N).
+ * GPS inside this outline is LOADING. Leave it → filled.
+ */
+export const PORBANDAR_LOAD_POLYGON: FencePolygon = [
+  [21.654215, 69.570169],
+  [21.652923, 69.571327],
+  [21.652163, 69.569115],
+  [21.652722, 69.568291],
+];
+
+const PORBANDAR_LOAD_CENTER = {
+  lat:
+    PORBANDAR_LOAD_POLYGON.reduce((s, [lat]) => s + lat, 0) /
+    PORBANDAR_LOAD_POLYGON.length,
+  lng:
+    PORBANDAR_LOAD_POLYGON.reduce((s, [, lng]) => s + lng, 0) /
+    PORBANDAR_LOAD_POLYGON.length,
+};
+
 export const LOADING_POINTS: LoadingPoint[] = [
   // —— Mundra Adani ——
   {
@@ -283,65 +427,62 @@ export const LOADING_POINTS: LoadingPoint[] = [
     id: "pipavav-aegis-load1",
     name: "Aegis Pipavav Loading Point 1",
     port: "PIPAVAV",
-    lat: 20.93516,
-    lng: 71.496846,
-    radiusM: 50,
+    lat: AEGIS_PIPAVAV_LOAD1_CENTER.lat,
+    lng: AEGIS_PIPAVAV_LOAD1_CENTER.lng,
+    radiusM: 30,
     kind: "loading",
+    polygon: AEGIS_PIPAVAV_LOAD1_POLYGON,
   },
   {
     id: "pipavav-aegis-load2",
     name: "Aegis Pipavav Loading Point 2",
     port: "PIPAVAV",
-    lat: 20.935888,
-    lng: 71.498414,
-    radiusM: 50,
+    lat: AEGIS_PIPAVAV_LOAD2_CENTER.lat,
+    lng: AEGIS_PIPAVAV_LOAD2_CENTER.lng,
+    radiusM: 30,
     kind: "loading",
+    polygon: AEGIS_PIPAVAV_LOAD2_POLYGON,
   },
   {
     id: "pipavav-aegis-parking",
     name: "Aegis Pipavav Parking",
     port: "PIPAVAV",
-    lat: 20.936296,
-    lng: 71.496275,
+    lat: AEGIS_PIPAVAV_PARK_CENTER.lat,
+    lng: AEGIS_PIPAVAV_PARK_CENTER.lng,
     radiusM: 40,
     kind: "parking",
+    polygon: AEGIS_PIPAVAV_PARK_POLYGON,
   },
   {
     id: "pipavav-shreji-parking",
     name: "Shreji Parking Aegis Pipavav",
     port: "PIPAVAV",
-    lat: 20.985982,
-    lng: 71.51144,
+    lat: SHREJI_PIPAVAV_PARK_CENTER.lat,
+    lng: SHREJI_PIPAVAV_PARK_CENTER.lng,
     radiusM: 75,
     kind: "parking",
+    polygon: SHREJI_PIPAVAV_PARK_POLYGON,
   },
   // —— Aegis Kandla ——
   {
     id: "kandla-aegis-parking",
     name: "Aegis Kandla Parking",
     port: "KANDLA",
-    lat: 23.026978,
-    lng: 70.196829,
-    radiusM: 75,
+    lat: AEGIS_KANDLA_PARK_CENTER.lat,
+    lng: AEGIS_KANDLA_PARK_CENTER.lng,
+    radiusM: 40,
     kind: "parking",
+    polygon: AEGIS_KANDLA_PARK_POLYGON,
   },
   {
-    id: "kandla-aegis-load1",
-    name: "Aegis Kandla Loading Point 1",
+    id: "kandla-aegis-loading",
+    name: AEGIS_KANDLA_LOADING_NAME,
     port: "KANDLA",
-    lat: 23.028229,
-    lng: 70.20123,
-    radiusM: 18,
+    lat: AEGIS_KANDLA_LOAD_CENTER.lat,
+    lng: AEGIS_KANDLA_LOAD_CENTER.lng,
+    radiusM: 40,
     kind: "loading",
-  },
-  {
-    id: "kandla-aegis-load2",
-    name: "Aegis Kandla Loading Point 2",
-    port: "KANDLA",
-    lat: 23.028769,
-    lng: 70.199516,
-    radiusM: 50,
-    kind: "loading",
+    polygon: AEGIS_KANDLA_LOAD_POLYGON,
   },
   // —— Dahej GTPCL ——
   {
@@ -379,10 +520,11 @@ export const LOADING_POINTS: LoadingPoint[] = [
     id: "porbandar-confidence",
     name: "Porbandar Confidence Loading & Parking",
     port: "PORBANDAR",
-    lat: 21.652721,
-    lng: 69.569991,
+    lat: PORBANDAR_LOAD_CENTER.lat,
+    lng: PORBANDAR_LOAD_CENTER.lng,
     radiusM: 58,
     kind: "loading",
+    polygon: PORBANDAR_LOAD_POLYGON,
   },
 ];
 
@@ -403,6 +545,18 @@ export function canonicalParkingName(
   if (/iocl/i.test(n) && /parking\s*[12]\b/i.test(n)) return IOCL_PARKING_NAME;
   if (/mundra/i.test(n) && /ct\s*4/i.test(n) && /park/i.test(n)) {
     return MUNDRA_CT4_PARKING_NAME;
+  }
+  return n;
+}
+
+/** Retired Aegis Kandla Loading Point 1/2 → the merged yard name. */
+export function canonicalLoadingName(
+  name: string | null | undefined,
+): string | null {
+  if (!name) return null;
+  const n = name.trim();
+  if (/aegis/i.test(n) && /kandla/i.test(n) && /load/i.test(n)) {
+    return AEGIS_KANDLA_LOADING_NAME;
   }
   return n;
 }

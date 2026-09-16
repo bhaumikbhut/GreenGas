@@ -16,6 +16,7 @@ import {
   PARKING_POINTS,
   PORT_LOADING_POINTS,
   canonicalParkingName,
+  canonicalLoadingName,
   type LoadingPoint,
 } from "@/lib/loading-points";
 
@@ -286,6 +287,8 @@ export function FleetProvider({ children }: { children: ReactNode }) {
             cargo: "EMPTY" as const,
             parkingPoint: canonicalParkingName(t.parkingPoint),
             lastPark: canonicalParkingName(t.lastPark),
+            loadingPoint: canonicalLoadingName(t.loadingPoint),
+            lastLoadedFrom: canonicalLoadingName(t.lastLoadedFrom),
           };
         }
         if (t.status === "OFFLINE") {
@@ -294,12 +297,16 @@ export function FleetProvider({ children }: { children: ReactNode }) {
             status: t.cargo === "LOADED" ? ("LOADED" as const) : ("ON_ROAD" as const),
             parkingPoint: canonicalParkingName(t.parkingPoint),
             lastPark: canonicalParkingName(t.lastPark),
+            loadingPoint: canonicalLoadingName(t.loadingPoint),
+            lastLoadedFrom: canonicalLoadingName(t.lastLoadedFrom),
           };
         }
         return {
           ...t,
           parkingPoint: canonicalParkingName(t.parkingPoint),
           lastPark: canonicalParkingName(t.lastPark),
+          loadingPoint: canonicalLoadingName(t.loadingPoint),
+          lastLoadedFrom: canonicalLoadingName(t.lastLoadedFrom),
         };
       }),
     [trucks],

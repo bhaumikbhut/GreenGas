@@ -463,7 +463,7 @@ export default function TruckMap({
         />
         {uniqueBoxedPoints(loadingPoints).map((p) => {
           const isParking = p.kind === "parking";
-          const color = isParking ? "#a16207" : "#1f7a4d";
+          const color = isParking ? statusColor("PARK") : statusColor("LOADING");
           const outline = fenceOutline(p);
           if (!outline) return null;
           const label = p.polygon
@@ -495,7 +495,7 @@ export default function TruckMap({
         {loadingPoints.map((p) => {
         if (fenceOutline(p)) return null;
         const isParking = p.kind === "parking";
-        const color = isParking ? "#a16207" : "#1f7a4d";
+        const color = isParking ? statusColor("PARK") : statusColor("LOADING");
         const r = p.radiusM > 0 ? p.radiusM : radiusM;
         return (
           <Circle
@@ -525,8 +525,8 @@ export default function TruckMap({
           center={[p.lat, p.lng]}
           radius={p.radiusM ?? radiusM}
           pathOptions={{
-            color: "#0f766e",
-            fillColor: "#0f766e",
+            color: statusColor("AT_FACTORY"),
+            fillColor: statusColor("AT_FACTORY"),
             fillOpacity: 0.12,
             weight: 1,
           }}

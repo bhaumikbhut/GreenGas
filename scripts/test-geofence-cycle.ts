@@ -18,8 +18,16 @@ import {
   MUNDRA_CT4_PARK_E_POLYGON,
   MUNDRA_CT4_PARK_W_POLYGON,
   MUNDRA_MOKHA_PARK_POLYGON,
+  AEGIS_KANDLA_PARK_POLYGON,
+  AEGIS_KANDLA_LOAD_POLYGON,
+  AEGIS_PIPAVAV_PARK_POLYGON,
+  AEGIS_PIPAVAV_LOAD1_POLYGON,
+  AEGIS_PIPAVAV_LOAD2_POLYGON,
+  SHREJI_PIPAVAV_PARK_POLYGON,
+  PORBANDAR_LOAD_POLYGON,
   LOADING_POINTS,
   canonicalParkingName,
+  canonicalLoadingName,
   type LoadingPoint,
 } from "../src/lib/loading-points";
 import type { FactoryPoint } from "../src/lib/factory-points";
@@ -582,6 +590,309 @@ assert(
   findNearestParkingPoint(mundraMokha.lat, mundraMokha.lng)?.point.id ===
     "mundra-mokha-parking",
   "GPS in the Mokha parking outline matches parking",
+);
+const aegisKandlaPark = LOADING_POINTS.find(
+  (p) => p.id === "kandla-aegis-parking",
+)!;
+assert(
+  Boolean(aegisKandlaPark.polygon) &&
+    (aegisKandlaPark.polygon?.length ?? 0) === 4,
+  "Aegis Kandla parking is the 4-corner Google Maps outline",
+);
+assert(
+  Boolean(aegisKandlaPark.polygon) &&
+    aegisKandlaPark.polygon!.every(
+      ([lat, lng], i) =>
+        lat === AEGIS_KANDLA_PARK_POLYGON[i][0] &&
+        lng === AEGIS_KANDLA_PARK_POLYGON[i][1],
+    ),
+  "Aegis Kandla parking corners match the measured Google Maps vertices",
+);
+assert(
+  pointInFencePolygon(
+    aegisKandlaPark.lat,
+    aegisKandlaPark.lng,
+    AEGIS_KANDLA_PARK_POLYGON,
+  ),
+  "Aegis Kandla parking pin sits inside the parking outline",
+);
+assert(
+  findNearestParkingPoint(aegisKandlaPark.lat, aegisKandlaPark.lng)?.point
+    .id === "kandla-aegis-parking",
+  "GPS in the Aegis Kandla parking outline matches parking",
+);
+assert(
+  !pointInFencePolygon(
+    aegisKandlaPark.lat,
+    aegisKandlaPark.lng,
+    IOCL_PARK_POLYGON,
+  ),
+  "Aegis Kandla parking does not overlap IOCL parking",
+);
+const aegisKandlaLoad = LOADING_POINTS.find(
+  (p) => p.id === "kandla-aegis-loading",
+)!;
+assert(
+  LOADING_POINTS.filter(
+    (p) => p.port === "KANDLA" && p.kind === "loading" && /aegis/i.test(p.name),
+  ).length === 1,
+  "Aegis Kandla loading 1 and 2 are merged into one yard",
+);
+assert(
+  Boolean(aegisKandlaLoad.polygon) &&
+    (aegisKandlaLoad.polygon?.length ?? 0) === 4,
+  "Aegis Kandla loading is the 4-corner Google Maps outline",
+);
+assert(
+  Boolean(aegisKandlaLoad.polygon) &&
+    aegisKandlaLoad.polygon!.every(
+      ([lat, lng], i) =>
+        lat === AEGIS_KANDLA_LOAD_POLYGON[i][0] &&
+        lng === AEGIS_KANDLA_LOAD_POLYGON[i][1],
+    ),
+  "Aegis Kandla loading corners match the measured Google Maps vertices",
+);
+assert(
+  pointInFencePolygon(
+    aegisKandlaLoad.lat,
+    aegisKandlaLoad.lng,
+    AEGIS_KANDLA_LOAD_POLYGON,
+  ),
+  "Aegis Kandla loading pin sits inside the loading outline",
+);
+assert(
+  findNearestLoadingPoint(aegisKandlaLoad.lat, aegisKandlaLoad.lng)?.point
+    .id === "kandla-aegis-loading",
+  "GPS in the Aegis Kandla loading outline matches loading",
+);
+assert(
+  !pointInFencePolygon(
+    aegisKandlaLoad.lat,
+    aegisKandlaLoad.lng,
+    AEGIS_KANDLA_PARK_POLYGON,
+  ),
+  "Aegis Kandla loading does not overlap parking",
+);
+assert(
+  !pointInFencePolygon(
+    aegisKandlaPark.lat,
+    aegisKandlaPark.lng,
+    AEGIS_KANDLA_LOAD_POLYGON,
+  ),
+  "Aegis Kandla parking is outside the loading outline",
+);
+assert(
+  canonicalLoadingName("Aegis Kandla Loading Point 1") ===
+    "Aegis Kandla Loading Point" &&
+    canonicalLoadingName("Aegis Kandla Loading Point 2") ===
+      "Aegis Kandla Loading Point",
+  "retired Aegis Kandla loading 1/2 labels map to the merged yard",
+);
+const aegisPipavavPark = LOADING_POINTS.find(
+  (p) => p.id === "pipavav-aegis-parking",
+)!;
+assert(
+  Boolean(aegisPipavavPark.polygon) &&
+    (aegisPipavavPark.polygon?.length ?? 0) === 4,
+  "Aegis Pipavav parking is the 4-corner Google Maps outline",
+);
+assert(
+  Boolean(aegisPipavavPark.polygon) &&
+    aegisPipavavPark.polygon!.every(
+      ([lat, lng], i) =>
+        lat === AEGIS_PIPAVAV_PARK_POLYGON[i][0] &&
+        lng === AEGIS_PIPAVAV_PARK_POLYGON[i][1],
+    ),
+  "Aegis Pipavav parking corners match the measured Google Maps vertices",
+);
+assert(
+  pointInFencePolygon(
+    aegisPipavavPark.lat,
+    aegisPipavavPark.lng,
+    AEGIS_PIPAVAV_PARK_POLYGON,
+  ),
+  "Aegis Pipavav parking pin sits inside the parking outline",
+);
+assert(
+  findNearestParkingPoint(aegisPipavavPark.lat, aegisPipavavPark.lng)?.point
+    .id === "pipavav-aegis-parking",
+  "GPS in the Aegis Pipavav parking outline matches parking",
+);
+const aegisPipavavLoad1 = LOADING_POINTS.find(
+  (p) => p.id === "pipavav-aegis-load1",
+)!;
+assert(
+  Boolean(aegisPipavavLoad1.polygon) &&
+    (aegisPipavavLoad1.polygon?.length ?? 0) === 4,
+  "Aegis Pipavav loading 1 is the 4-corner Google Maps outline",
+);
+assert(
+  Boolean(aegisPipavavLoad1.polygon) &&
+    aegisPipavavLoad1.polygon!.every(
+      ([lat, lng], i) =>
+        lat === AEGIS_PIPAVAV_LOAD1_POLYGON[i][0] &&
+        lng === AEGIS_PIPAVAV_LOAD1_POLYGON[i][1],
+    ),
+  "Aegis Pipavav loading 1 corners match the measured Google Maps vertices",
+);
+assert(
+  pointInFencePolygon(
+    aegisPipavavLoad1.lat,
+    aegisPipavavLoad1.lng,
+    AEGIS_PIPAVAV_LOAD1_POLYGON,
+  ),
+  "Aegis Pipavav loading 1 pin sits inside the loading outline",
+);
+assert(
+  findNearestLoadingPoint(aegisPipavavLoad1.lat, aegisPipavavLoad1.lng)?.point
+    .id === "pipavav-aegis-load1",
+  "GPS in the Aegis Pipavav loading 1 outline matches loading",
+);
+assert(
+  !pointInFencePolygon(
+    aegisPipavavLoad1.lat,
+    aegisPipavavLoad1.lng,
+    AEGIS_PIPAVAV_PARK_POLYGON,
+  ),
+  "Aegis Pipavav loading 1 does not overlap parking",
+);
+assert(
+  !pointInFencePolygon(
+    aegisPipavavPark.lat,
+    aegisPipavavPark.lng,
+    AEGIS_PIPAVAV_LOAD1_POLYGON,
+  ),
+  "Aegis Pipavav parking is outside loading 1",
+);
+const aegisPipavavLoad2 = LOADING_POINTS.find(
+  (p) => p.id === "pipavav-aegis-load2",
+)!;
+assert(
+  Boolean(aegisPipavavLoad2.polygon) &&
+    (aegisPipavavLoad2.polygon?.length ?? 0) === 4,
+  "Aegis Pipavav loading 2 is the 4-corner Google Maps outline",
+);
+assert(
+  Boolean(aegisPipavavLoad2.polygon) &&
+    aegisPipavavLoad2.polygon!.every(
+      ([lat, lng], i) =>
+        lat === AEGIS_PIPAVAV_LOAD2_POLYGON[i][0] &&
+        lng === AEGIS_PIPAVAV_LOAD2_POLYGON[i][1],
+    ),
+  "Aegis Pipavav loading 2 corners match the measured Google Maps vertices",
+);
+assert(
+  pointInFencePolygon(
+    aegisPipavavLoad2.lat,
+    aegisPipavavLoad2.lng,
+    AEGIS_PIPAVAV_LOAD2_POLYGON,
+  ),
+  "Aegis Pipavav loading 2 pin sits inside the loading outline",
+);
+assert(
+  findNearestLoadingPoint(aegisPipavavLoad2.lat, aegisPipavavLoad2.lng)?.point
+    .id === "pipavav-aegis-load2",
+  "GPS in the Aegis Pipavav loading 2 outline matches loading",
+);
+assert(
+  !pointInFencePolygon(
+    aegisPipavavLoad2.lat,
+    aegisPipavavLoad2.lng,
+    AEGIS_PIPAVAV_LOAD1_POLYGON,
+  ),
+  "Aegis Pipavav loading 2 does not overlap loading 1",
+);
+assert(
+  !pointInFencePolygon(
+    aegisPipavavLoad1.lat,
+    aegisPipavavLoad1.lng,
+    AEGIS_PIPAVAV_LOAD2_POLYGON,
+  ),
+  "Aegis Pipavav loading 1 does not overlap loading 2",
+);
+const shrejiPark = LOADING_POINTS.find((p) => p.id === "pipavav-shreji-parking")!;
+assert(
+  Boolean(shrejiPark.polygon) && (shrejiPark.polygon?.length ?? 0) === 6,
+  "Shreji Pipavav parking is the 6-corner Google Maps outline",
+);
+assert(
+  Boolean(shrejiPark.polygon) &&
+    shrejiPark.polygon!.every(
+      ([lat, lng], i) =>
+        lat === SHREJI_PIPAVAV_PARK_POLYGON[i][0] &&
+        lng === SHREJI_PIPAVAV_PARK_POLYGON[i][1],
+    ),
+  "Shreji Pipavav parking corners match the measured Google Maps vertices",
+);
+assert(
+  pointInFencePolygon(shrejiPark.lat, shrejiPark.lng, SHREJI_PIPAVAV_PARK_POLYGON),
+  "Shreji Pipavav parking pin sits inside the parking outline",
+);
+assert(
+  findNearestParkingPoint(shrejiPark.lat, shrejiPark.lng)?.point.id ===
+    "pipavav-shreji-parking",
+  "GPS in the Shreji Pipavav parking outline matches parking",
+);
+const porbandar = LOADING_POINTS.find((p) => p.id === "porbandar-confidence")!;
+assert(
+  porbandar.kind === "loading",
+  "Porbandar combined yard is a loading location",
+);
+assert(
+  Boolean(porbandar.polygon) && (porbandar.polygon?.length ?? 0) === 4,
+  "Porbandar is the 4-corner Google Maps outline",
+);
+assert(
+  Boolean(porbandar.polygon) &&
+    porbandar.polygon!.every(
+      ([lat, lng], i) =>
+        lat === PORBANDAR_LOAD_POLYGON[i][0] &&
+        lng === PORBANDAR_LOAD_POLYGON[i][1],
+    ),
+  "Porbandar corners match the measured Google Maps vertices",
+);
+assert(
+  pointInFencePolygon(porbandar.lat, porbandar.lng, PORBANDAR_LOAD_POLYGON),
+  "Porbandar pin sits inside the loading outline",
+);
+assert(
+  findNearestLoadingPoint(porbandar.lat, porbandar.lng)?.point.id ===
+    "porbandar-confidence",
+  "GPS in the Porbandar outline matches loading",
+);
+assert(
+  !findNearestParkingPoint(porbandar.lat, porbandar.lng),
+  "Porbandar outline is not parking",
+);
+const porbandarIn = nextStatus({
+  prev: undefined,
+  insideLoading: { point: porbandar, distanceM: 10 },
+  insideParking: none,
+  insideFactory: none,
+  online: true,
+  now: t0,
+});
+assert(porbandarIn.status === "LOADING", "GPS inside Porbandar outline → LOADING");
+let porbandarLeave = porbandarIn;
+porbandarLeave = nextStatus({
+  prev: porbandarLeave,
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: none,
+  online: true,
+  now: t0 + 30_000,
+});
+porbandarLeave = nextStatus({
+  prev: porbandarLeave,
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: none,
+  online: true,
+  now: t0 + 60_000,
+});
+assert(
+  porbandarLeave.status === "LOADED" && porbandarLeave.cargo === "LOADED",
+  "leave Porbandar loading outline → filled",
 );
 const inLoadBox = nextStatus({
   prev: {
