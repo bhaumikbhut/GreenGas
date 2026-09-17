@@ -5,6 +5,8 @@ import {
   resolveFactoryGeofence,
   nextStatus,
   normalizeMemory,
+  replayGpsTrail,
+  distanceToNearestLoadingOutlineM,
   type AutoStatus,
   type TruckMemory,
 } from "@/lib/geofence";
@@ -19,7 +21,7 @@ import {
   type ProtrackDevice,
   type ProtrackTrackPoint,
 } from "@/lib/protrack";
-import { fetchAllPortalFleets, gpsSource } from "@/lib/protrack-portal";
+import { fetchAllPortalFleets, fetchPortalPlayback, gpsSource } from "@/lib/protrack-portal";
 import {
   readTruckStore,
   statusStoreMode,
@@ -45,6 +47,43 @@ const ALERT_STATUSES = new Set<AutoStatus>([
 function radiusM(): number {
   const n = Number(process.env.GEOFENCE_RADIUS_M || 500);
   return Number.isFinite(n) && n > 0 ? n : 500;
+}
+
+const TRAIL_NEAR_LOADING_M = 400;
+const TRAIL_CACHE_MS = 10 * 60 * 1000;
+const trailCache = new Map<string, { at: number; mem: TruckMemory }>();
+
+/** Replay recent portal GPS when live cargo looks empty next to a loading yard. */
+async function recoverFillFromRecentGps(
+  device: ProtrackDevice,
+  fallbackRadiusM: number,
+): Promise<TruckMemory | null> {
+  const hit = trailCache.get(device.imei);
+  if (hit && Date.now() - hit.at < TRAIL_CACHE_MS) return hit.mem;
+  try {
+    const end = Date.now();
+    const pb = await fetchPortalPlayback({
+      imei: device.imei,
+      begin: end - 16 * 60 * 60 * 1000,
+      end,
+      accountLabel: device.accountLabel,
+      deviceId: device.deviceId,
+      maxPages: 6,
+    });
+    const mem = replayGpsTrail(
+      pb.points.map((p) => ({
+        lat: p.latitude,
+        lng: p.longitude,
+        speed: p.speed,
+        atMs: p.gpstime * 1000,
+      })),
+      fallbackRadiusM,
+    );
+    trailCache.set(device.imei, { at: Date.now(), mem });
+    return mem;
+  } catch {
+    return null;
+  }
 }
 
 async function loadFromOpenApi(): Promise<{
@@ -205,7 +244,7 @@ export async function buildFleetSnapshot(
       : null;
 
     const prev = store[device.imei];
-    const memory = nextStatus({
+    let memory = nextStatus({
       prev,
       insideLoading,
       insideParking,
@@ -216,6 +255,41 @@ export async function buildFleetSnapshot(
       speed: track?.speed ?? null,
       accstatus: track?.accstatus ?? null,
     });
+
+    if (
+      hasFix &&
+      !insideParking &&
+      memory.cargo === "EMPTY" &&
+      memory.status !== "LOADING" &&
+      memory.status !== "PARK"
+    ) {
+      const dLoad = distanceToNearestLoadingOutlineM(
+        track!.latitude,
+        track!.longitude,
+      );
+      if (dLoad != null && dLoad <= TRAIL_NEAR_LOADING_M) {
+        const trail = await recoverFillFromRecentGps(device, r);
+        if (
+          trail &&
+          (trail.cargo === "LOADED" ||
+            trail.status === "LOADED" ||
+            trail.status === "LOADING" ||
+            trail.status === "AT_FACTORY")
+        ) {
+          memory = nextStatus({
+            prev: trail,
+            insideLoading,
+            insideParking,
+            insideFactory,
+            online: Boolean(track) && online,
+            lat: track!.latitude,
+            lng: track!.longitude,
+            speed: track?.speed ?? null,
+            accstatus: track?.accstatus ?? null,
+          });
+        }
+      }
+    }
 
     const prevNorm = prev ? normalizeMemory(prev) : null;
     const leftFactory =

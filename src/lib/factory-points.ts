@@ -1,3 +1,6 @@
+import type { FencePolygon } from "./loading-points";
+import { FACTORY_POLYGONS } from "./factory-polygons";
+
 export type FactoryPoint = {
   id: string;
   name: string;
@@ -5,17 +8,19 @@ export type FactoryPoint = {
   company?: string;
   lat: number;
   lng: number;
-  /** Per-yard radius — sized from nearest neighbor so close plants do not overlap */
+  /** Unused for matching — every factory uses `polygon`. */
   radiusM?: number;
+  /** Satellite rooftop / premises outline. GPS and the map use this shape only. */
+  polygon?: FencePolygon;
 };
 
 /**
  * Factory unload yards from Google Maps (customer list + Sep 2026 sheet).
  *
- * Radius ≈ 10% of distance to nearest factory (half of the previous 25–175 m
- * circles, now ≈13–88 m). GPS at the gate is matched separately: a stopped
- * truck within 320 m of the nearest pin counts as that factory. If a truck is
- * inside more than one circle, nearest pin wins.
+ * Accurate premises = satellite rooftop outline on `polygon` (Microsoft
+ * building footprints matched to each pin). Every factory uses this method —
+ * no circle fallback. GPS uses the ring + 80 m gate. If a truck is inside
+ * more than one match, nearest pin wins.
  */
 export const FACTORY_POINTS: FactoryPoint[] = [
   {
@@ -1408,3 +1413,8 @@ export const FACTORY_POINTS: FactoryPoint[] = [
     radiusM: 57,
   },
 ];
+
+for (const point of FACTORY_POINTS) {
+  const ring = FACTORY_POLYGONS[point.id];
+  if (ring && ring.length >= 3) point.polygon = ring;
+}

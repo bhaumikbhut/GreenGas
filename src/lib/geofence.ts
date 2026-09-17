@@ -3,21 +3,26 @@ import {
   PORT_LOADING_POINTS,
   PARKING_POINTS,
   type FenceBox,
+  type FencePolygon,
   type LoadingPoint,
 } from "./loading-points";
 
 /**
- * Trip cycle (GPS only — known pins only):
- *   ON_ROAD → enter parking      → PARK (empty)
- *   PARK → leave parking         → ON_ROAD (empty)
- *   PARK/ON_ROAD → enter loading → LOADING
- *   LOADING → leave loading      → LOADED (filled)
- *   LOADED → enter factory pin   → AT_FACTORY
- *   AT_FACTORY → leave factory   → ON_ROAD (empty) + lastFactory
- *   LOADED → re-enter loading    → LOADING (at the bay now)
+ * Trip cycle — location and cargo are separate (industry geofence FSM):
  *
- * Factory enter: painted circle while moving; nearest pin within 320 m when
- * stopped (gate GPS). No "Unknown factory". Highway rest is not a factory.
+ *   Place from live GPS (loading wins, then factory, then parking).
+ *   Cargo latches on events: leave loading → filled; leave factory → empty.
+ *   Parking is a place, not a cargo reset. A filled truck waiting next to
+ *   the bay stays LOADED.
+ *
+ * Display:
+ *   inside loading → LOADING
+ *   inside factory → AT_FACTORY
+ *   cargo filled   → LOADED (road, apron, or parking)
+ *   inside parking → PARK (empty, waiting to load)
+ *   else           → ON_ROAD empty
+ *
+ * Known pins only. No Unknown factory. No circle fallback.
  */
 
 /** @deprecated Unused — leave-loading no longer requires dwell. */
@@ -144,7 +149,7 @@ export function pointInsideLoadingPoint(
 
 /** Outline to draw on the map: measured polygon, else fitted box corners. */
 export function fenceOutline(
-  point: LoadingPoint,
+  point: { polygon?: FencePolygon; box?: FenceBox },
 ): [number, number][] | null {
   if (point.polygon && point.polygon.length >= 3) return point.polygon;
   if (point.box) return fenceBoxCorners(point.box);
@@ -246,6 +251,10 @@ export function findNearestParkingPoint(
 export const FACTORY_GATE_MATCH_M = 320;
 /** Driving past a plant must not count as a delivery. */
 export const FACTORY_GATE_MAX_SPEED = 8;
+/** Stopped just outside a factory rooftop outline (gate / plot road).
+ *  Satellite footprints are the hall, not the full compound, so this is
+ *  wider than a surveyed fence. Nearest pin still wins on overlap. */
+export const FACTORY_OUTLINE_GATE_M = 80;
 /** Stopped just outside an outlined parking yard is still empty (queue / road). */
 export const PARK_APRON_EMPTY_M = 120;
 
@@ -282,6 +291,27 @@ function distanceToSegmentM(
   return Math.hypot(e, n);
 }
 
+/** 0 if inside the ring; otherwise meters to the nearest edge. */
+export function distanceToPolygonRingM(
+  lat: number,
+  lng: number,
+  ring: Array<[number, number]>,
+): number | null {
+  if (ring.length < 3) return null;
+  if (pointInFencePolygon(lat, lng, ring)) return 0;
+  let min = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < ring.length; i++) {
+    const d = distanceToSegmentM(
+      lat,
+      lng,
+      ring[i],
+      ring[(i + 1) % ring.length],
+    );
+    if (d < min) min = d;
+  }
+  return min;
+}
+
 /** 0 if inside the outline; otherwise meters to the nearest edge. */
 export function distanceToYardOutlineM(
   lat: number,
@@ -289,19 +319,23 @@ export function distanceToYardOutlineM(
   point: LoadingPoint,
 ): number | null {
   const outline = fenceOutline(point);
-  if (!outline || outline.length < 3) return null;
-  if (pointInFencePolygon(lat, lng, outline)) return 0;
-  let min = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < outline.length; i++) {
-    const d = distanceToSegmentM(
-      lat,
-      lng,
-      outline[i],
-      outline[(i + 1) % outline.length],
-    );
-    if (d < min) min = d;
-  }
-  return min;
+  if (!outline) return null;
+  return distanceToPolygonRingM(lat, lng, outline);
+}
+
+export function pointInsideFactoryPoint(
+  lat: number,
+  lng: number,
+  point: FactoryPoint,
+  _fallbackRadiusM: number,
+  opts?: { gateMatchM?: number },
+): boolean {
+  const gate = opts?.gateMatchM && opts.gateMatchM > 0 ? opts.gateMatchM : 0;
+  if (!point.polygon || point.polygon.length < 3) return false;
+  if (pointInFencePolygon(lat, lng, point.polygon)) return true;
+  if (gate <= 0) return false;
+  const d = distanceToPolygonRingM(lat, lng, point.polygon);
+  return d != null && d <= Math.min(gate, FACTORY_OUTLINE_GATE_M);
 }
 
 export function findNearestFactoryPoint(
@@ -310,22 +344,20 @@ export function findNearestFactoryPoint(
   fallbackRadiusM: number,
   opts?: { gateMatchM?: number },
 ): { point: FactoryPoint; distanceM: number } | null {
-  const gate = opts?.gateMatchM && opts.gateMatchM > 0 ? opts.gateMatchM : 0;
   let best: { point: FactoryPoint; distanceM: number } | null = null;
   for (const point of FACTORY_POINTS) {
-    const painted =
-      point.radiusM && point.radiusM > 0 ? point.radiusM : fallbackRadiusM;
-    const r = Math.max(painted, gate);
+    if (!pointInsideFactoryPoint(lat, lng, point, fallbackRadiusM, opts)) {
+      continue;
+    }
     const distanceM = haversineMeters(lat, lng, point.lat, point.lng);
-    // Nearest pin inside its match radius wins (handles close factories).
-    if (distanceM <= r && (!best || distanceM < best.distanceM)) {
+    if (!best || distanceM < best.distanceM) {
       best = { point, distanceM };
     }
   }
   return best;
 }
 
-/** Tight painted circle while moving; gate buffer when stopped / speed unknown. */
+/** Rooftop outline while moving; outline + 80 m gate when stopped. */
 export function resolveFactoryGeofence(
   lat: number,
   lng: number,
@@ -335,10 +367,59 @@ export function resolveFactoryGeofence(
   const moving =
     speed != null && Number.isFinite(speed) && speed > FACTORY_GATE_MAX_SPEED;
   return findNearestFactoryPoint(lat, lng, fallbackRadiusM, {
-    gateMatchM: moving ? 0 : FACTORY_GATE_MATCH_M,
+    gateMatchM: moving ? 0 : FACTORY_OUTLINE_GATE_M,
   });
 }
 
+/**
+ * Walk a recent GPS trail through the same geofence rules as live polls.
+ * Used to recover a missed fill when the live pin sits just outside loading.
+ */
+export function replayGpsTrail(
+  points: Array<{
+    lat: number;
+    lng: number;
+    speed?: number | null;
+    atMs: number;
+  }>,
+  fallbackRadiusM: number,
+): TruckMemory {
+  let mem: TruckMemory | undefined;
+  for (const p of points) {
+    if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
+    mem = nextStatus({
+      prev: mem,
+      insideLoading: findNearestLoadingPoint(p.lat, p.lng),
+      insideParking: findNearestParkingPoint(p.lat, p.lng),
+      insideFactory: resolveFactoryGeofence(
+        p.lat,
+        p.lng,
+        fallbackRadiusM,
+        p.speed,
+      ),
+      online: true,
+      now: p.atMs,
+      lat: p.lat,
+      lng: p.lng,
+      speed: p.speed ?? null,
+    });
+  }
+  return mem ?? normalizeMemory(undefined);
+}
+
+export function distanceToNearestLoadingOutlineM(
+  lat: number,
+  lng: number,
+): number | null {
+  let best: number | null = null;
+  for (const p of PORT_LOADING_POINTS) {
+    if (!hasYardOutline(p)) continue;
+    const d = distanceToYardOutlineM(lat, lng, p);
+    if (d == null) continue;
+    if (best == null || d < best) best = d;
+  }
+  return best;
+}
 export function isKnownFactoryId(id: string | null | undefined): boolean {
   if (!id) return false;
   if (id === "fac-unknown") return false; // legacy synthetic — ignore
@@ -375,8 +456,12 @@ export function normalizeMemory(
     // Legacy GPS-offline flag — keep last cargo, not a fleet status.
     status = cargo === "LOADED" ? "LOADED" : "ON_ROAD";
   } else if (raw === "PARK" || raw === "PARKING") {
-    status = "PARK";
-    cargo = "EMPTY";
+    // Parking is a place. Sticky cargo wins if a fill was already latched.
+    if (cargo === "LOADED") status = "LOADED";
+    else {
+      status = "PARK";
+      cargo = "EMPTY";
+    }
   } else if (raw === "LOADING") status = "LOADING";
   else if (raw === "AT_FACTORY" || raw === "ARRIVED") {
     status = "AT_FACTORY";
@@ -388,11 +473,14 @@ export function normalizeMemory(
     status = "ON_ROAD";
     cargo = "EMPTY";
   } else if (raw === "ON_ROAD") {
-    status = "ON_ROAD";
-    cargo = "EMPTY";
+    if (cargo === "LOADED") status = "LOADED";
+    else {
+      status = "ON_ROAD";
+      cargo = "EMPTY";
+    }
   } else {
-    status = "ON_ROAD";
-    cargo = "EMPTY";
+    status = cargo === "LOADED" ? "LOADED" : "ON_ROAD";
+    if (status !== "LOADED") cargo = "EMPTY";
   }
 
   // Drop legacy "Unknown factory" — treat as filled on road until a real pin hits.
@@ -458,7 +546,7 @@ export function nextStatus(params: {
   const now = params.now ?? Date.now();
   const prev = normalizeMemory(params.prev);
 
-  const base = {
+  const labels = {
     lastNotifiedStatus: prev.lastNotifiedStatus ?? null,
     lastNotifiedAt: prev.lastNotifiedAt ?? null,
     lastLoadedFrom: prev.lastLoadedFrom ?? null,
@@ -469,7 +557,6 @@ export function nextStatus(params: {
   const loadingIds = new Set(PORT_LOADING_POINTS.map((p) => p.id));
   const parkingIds = new Set(PARKING_POINTS.map((p) => p.id));
 
-  // Trust status even if geofence id was lost / renamed in Redis.
   const wasLoading =
     prev.status === "LOADING" ||
     (prev.geofenceKind === "loading" &&
@@ -480,150 +567,34 @@ export function nextStatus(params: {
     (prev.geofenceKind === "parking" &&
       prev.geofenceId != null &&
       parkingIds.has(prev.geofenceId));
+  const wasAtFactory =
+    prev.status === "AT_FACTORY" ||
+    (prev.geofenceKind === "factory" &&
+      prev.geofenceId != null &&
+      isKnownFactoryId(prev.geofenceId));
 
-  const isFilled =
-    prev.cargo === "LOADED" ||
-    prev.status === "LOADED" ||
-    prev.status === "AT_FACTORY";
+  let cargo: "LOADED" | "EMPTY" = prev.cargo;
+  if (prev.status === "LOADED" || prev.status === "AT_FACTORY") cargo = "LOADED";
 
-  // --- Filled truck ---
-  if (isFilled) {
-    // Circle loading bays: stay LOADED if GPS is still on the same pin (jitter).
-    // Outlined loading yards: GPS inside the outline is LOADING.
-    if (params.insideLoading) {
-      const sameBay =
-        prev.lastLoadedFrom != null &&
-        prev.lastLoadedFrom === params.insideLoading.point.name;
-      // Accurate outline: GPS inside the loading yard is LOADING (not filled-wait).
-      if (sameBay && !hasYardOutline(params.insideLoading.point)) {
-        return {
-          ...base,
-          status: "LOADED",
-          geofenceId: null,
-          geofenceKind: null,
-          enteredAt: null,
-          outsideStreak: 0,
-          cargo: "LOADED",
-        };
-      }
+  // 1. Live place: loading outline wins.
+  if (params.insideLoading) {
+    const sameBay =
+      prev.lastLoadedFrom != null &&
+      prev.lastLoadedFrom === params.insideLoading.point.name;
+    // Unoutlined pins: GPS jitter on the same bay stays filled.
+    if (cargo === "LOADED" && sameBay && !hasYardOutline(params.insideLoading.point)) {
       return {
-        ...base,
-        status: "LOADING",
-        geofenceId: params.insideLoading.point.id,
-        geofenceKind: "loading",
-        enteredAt: now,
-        outsideStreak: 0,
-        cargo: "EMPTY",
-        lastLoadedFrom: null,
-      };
-    }
-
-    if (params.insideFactory) {
-      return {
-        ...base,
-        status: "AT_FACTORY",
-        geofenceId: params.insideFactory.point.id,
-        geofenceKind: "factory",
-        enteredAt:
-          prev.geofenceKind === "factory" &&
-          prev.geofenceId === params.insideFactory.point.id &&
-          prev.enteredAt
-            ? prev.enteredAt
-            : now,
-        outsideStreak: 0,
-        cargo: "LOADED",
-        lastFactory: params.insideFactory.point.name,
-      };
-    }
-
-    const wasAtFactory =
-      prev.status === "AT_FACTORY" ||
-      (prev.geofenceKind === "factory" &&
-        prev.geofenceId != null &&
-        isKnownFactoryId(prev.geofenceId));
-
-    const outsideFactoryStreak = wasAtFactory ? prev.outsideStreak + 1 : 0;
-
-    if (wasAtFactory && outsideFactoryStreak >= 2) {
-      return {
-        ...base,
-        status: "ON_ROAD",
+        ...labels,
+        status: "LOADED",
         geofenceId: null,
         geofenceKind: null,
         enteredAt: null,
         outsideStreak: 0,
-        cargo: "EMPTY",
-        lastFactory: prev.lastFactory ?? null,
-      };
-    }
-
-    if (wasAtFactory) {
-      return {
-        ...prev,
-        ...base,
-        status: "AT_FACTORY",
         cargo: "LOADED",
-        outsideStreak: outsideFactoryStreak,
       };
     }
-
-    // Filled trucks never return to parking — GPS in the yard is empty.
-    if (params.insideParking) {
-      return {
-        ...base,
-        status: "PARK",
-        geofenceId: params.insideParking.point.id,
-        geofenceKind: "parking",
-        enteredAt: now,
-        outsideStreak: 0,
-        cargo: "EMPTY",
-        lastLoadedFrom: null,
-        lastPark: params.insideParking.point.name,
-      };
-    }
-
-    // Stopped on the road just outside an outlined parking yard is empty
-    // (queue / admin road). Moving filled trucks stay LOADED.
-    if (
-      params.lat != null &&
-      params.lng != null &&
-      (params.speed == null || params.speed <= FACTORY_GATE_MAX_SPEED)
-    ) {
-      for (const p of PARKING_POINTS) {
-        if (!hasYardOutline(p)) continue;
-        const d = distanceToYardOutlineM(params.lat, params.lng, p);
-        if (d != null && d <= PARK_APRON_EMPTY_M) {
-          return {
-            ...base,
-            status: d === 0 ? "PARK" : "ON_ROAD",
-            geofenceId: d === 0 ? p.id : null,
-            geofenceKind: d === 0 ? "parking" : null,
-            enteredAt: d === 0 ? now : null,
-            outsideStreak: 0,
-            cargo: "EMPTY",
-            lastLoadedFrom: null,
-            lastPark: p.name,
-          };
-        }
-      }
-    }
-
-    // Filled on road (only known pins can change this).
     return {
-      ...base,
-      status: "LOADED",
-      geofenceId: null,
-      geofenceKind: null,
-      enteredAt: null,
-      outsideStreak: 0,
-      cargo: "LOADED",
-    };
-  }
-
-  // --- Empty truck: loading bay wins over parking ---
-  if (params.insideLoading) {
-    return {
-      ...base,
+      ...labels,
       status: "LOADING",
       geofenceId: params.insideLoading.point.id,
       geofenceKind: "loading",
@@ -635,43 +606,39 @@ export function nextStatus(params: {
           : now,
       outsideStreak: 0,
       cargo: "EMPTY",
+      lastLoadedFrom: null,
     };
   }
 
-  const leaveLoadingStreak = wasLoading ? prev.outsideStreak + 1 : 0;
-
-  if (wasLoading && leaveLoadingStreak >= 2) {
-    const fromPoint = PORT_LOADING_POINTS.find((p) => p.id === prev.geofenceId);
-    const loadedFrom =
-      fromPoint?.name ?? prev.lastLoadedFrom ?? null;
-
-    // Anything leaving a loading point is filled — never mark empty here.
-    return {
-      ...base,
-      status: "LOADED",
-      geofenceId: null,
-      geofenceKind: null,
-      enteredAt: null,
-      outsideStreak: 0,
-      cargo: "LOADED",
-      lastLoadedFrom: loadedFrom,
-    };
-  }
-
+  // 2. Leave loading → latch filled (two polls, ignore GPS flicker).
   if (wasLoading) {
+    const streak = prev.outsideStreak + 1;
+    if (streak >= 2) {
+      const fromPoint = PORT_LOADING_POINTS.find((p) => p.id === prev.geofenceId);
+      return {
+        ...labels,
+        status: "LOADED",
+        geofenceId: null,
+        geofenceKind: null,
+        enteredAt: null,
+        outsideStreak: 0,
+        cargo: "LOADED",
+        lastLoadedFrom: fromPoint?.name ?? prev.lastLoadedFrom ?? null,
+      };
+    }
     return {
       ...prev,
-      ...base,
+      ...labels,
       status: "LOADING",
       cargo: "EMPTY",
-      outsideStreak: leaveLoadingStreak,
+      outsideStreak: streak,
     };
   }
 
-  // Known factory pin — even if memory still says empty (missed fill on the way).
+  // 3. Factory pin — delivery. Empty cargo only after leave.
   if (params.insideFactory) {
     return {
-      ...base,
+      ...labels,
       status: "AT_FACTORY",
       geofenceId: params.insideFactory.point.id,
       geofenceKind: "factory",
@@ -686,11 +653,46 @@ export function nextStatus(params: {
       lastFactory: params.insideFactory.point.name,
     };
   }
+  if (wasAtFactory) {
+    const streak = prev.outsideStreak + 1;
+    if (streak >= 2) {
+      return {
+        ...labels,
+        status: "ON_ROAD",
+        geofenceId: null,
+        geofenceKind: null,
+        enteredAt: null,
+        outsideStreak: 0,
+        cargo: "EMPTY",
+        lastFactory: prev.lastFactory ?? null,
+      };
+    }
+    return {
+      ...prev,
+      ...labels,
+      status: "AT_FACTORY",
+      cargo: "LOADED",
+      outsideStreak: streak,
+    };
+  }
 
-  // Parking (waiting to load) — only empty trucks
+  // 4. Sticky cargo: a real fill survives parking / apron / road until factory.
+  if (cargo === "LOADED") {
+    return {
+      ...labels,
+      status: "LOADED",
+      geofenceId: null,
+      geofenceKind: null,
+      enteredAt: null,
+      outsideStreak: 0,
+      cargo: "LOADED",
+    };
+  }
+
+  // 5. Empty truck: parking is waiting to load.
   if (params.insideParking) {
     return {
-      ...base,
+      ...labels,
       status: "PARK",
       geofenceId: params.insideParking.point.id,
       geofenceKind: "parking",
@@ -705,37 +707,33 @@ export function nextStatus(params: {
       lastPark: params.insideParking.point.name,
     };
   }
-
-  const leaveParkStreak = wasPark ? prev.outsideStreak + 1 : 0;
-
-  if (wasPark && leaveParkStreak >= 2) {
-    const fromPark = PARKING_POINTS.find((p) => p.id === prev.geofenceId);
-    return {
-      ...base,
-      status: "ON_ROAD",
-      geofenceId: null,
-      geofenceKind: null,
-      enteredAt: null,
-      outsideStreak: 0,
-      cargo: "EMPTY",
-      lastLoadedFrom: null,
-      lastPark: prev.lastPark ?? fromPark?.name ?? null,
-    };
-  }
-
   if (wasPark) {
+    const streak = prev.outsideStreak + 1;
+    if (streak >= 2) {
+      const fromPark = PARKING_POINTS.find((p) => p.id === prev.geofenceId);
+      return {
+        ...labels,
+        status: "ON_ROAD",
+        geofenceId: null,
+        geofenceKind: null,
+        enteredAt: null,
+        outsideStreak: 0,
+        cargo: "EMPTY",
+        lastLoadedFrom: null,
+        lastPark: prev.lastPark ?? fromPark?.name ?? null,
+      };
+    }
     return {
       ...prev,
-      ...base,
+      ...labels,
       status: "PARK",
       cargo: "EMPTY",
-      outsideStreak: leaveParkStreak,
+      outsideStreak: streak,
     };
   }
 
-  // Empty on road (includes post-factory; lastFactory kept via base).
   return {
-    ...base,
+    ...labels,
     status: "ON_ROAD",
     geofenceId: null,
     geofenceKind: null,

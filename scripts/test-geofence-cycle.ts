@@ -5,7 +5,10 @@ import {
   findNearestParkingPoint,
   findNearestLoadingPoint,
   pointInFencePolygon,
+  pointInsideFactoryPoint,
   samePortFacility,
+  FACTORY_OUTLINE_GATE_M,
+  replayGpsTrail,
   type TruckMemory,
 } from "../src/lib/geofence";
 import {
@@ -30,7 +33,7 @@ import {
   canonicalLoadingName,
   type LoadingPoint,
 } from "../src/lib/loading-points";
-import type { FactoryPoint } from "../src/lib/factory-points";
+import { FACTORY_POINTS, type FactoryPoint } from "../src/lib/factory-points";
 
 const loadPt: LoadingPoint = {
   id: "mundra-loading",
@@ -239,8 +242,8 @@ const bad = nextStatus({
   now: afterDwell + 3000,
 });
 assert(
-  bad.status === "PARK" && bad.cargo === "EMPTY",
-  "LOADED at parking with no fill-at → PARK empty",
+  bad.status === "LOADED" && bad.cargo === "LOADED",
+  "LOADED at parking stays filled (cargo is a latch)",
 );
 
 const filled = nextStatus({
@@ -259,7 +262,10 @@ const filled = nextStatus({
   online: true,
   now: afterDwell + 3000,
 });
-assert(filled.status === "PARK" && filled.cargo === "EMPTY", "go to parking → PARK empty");
+assert(
+  filled.status === "LOADED" && filled.cargo === "LOADED",
+  "filled truck in parking stays filled",
+);
 
 // Leave park → ON_ROAD empty
 let parkLeave: TruckMemory = {
@@ -347,12 +353,67 @@ assert(
   `stopped GPS at G TONE/SEKOL gate → factory (${gate?.point.name} ${Math.round(gate?.distanceM ?? -1)}m)`,
 );
 assert(
-  resolveFactoryGeofence(22.74731, 70.96485, 500, 40) == null,
-  "moving past G TONE/SEKOL gate does not match",
+  resolveFactoryGeofence(22.7488, 70.9672, 500, 40) == null,
+  "moving on the road 200 m from SEKOL does not match",
 );
 assert(
   resolveFactoryGeofence(22.908441, 70.827361, 500, 0) == null,
   "NH27 rest 2.7 km from MONOLITH is not a factory",
+);
+
+const facPoly: FactoryPoint = {
+  id: "fac-test-poly",
+  name: "TEST POLY FACTORY",
+  lat: 22.75,
+  lng: 70.96,
+  polygon: [
+    [22.7502, 70.9598],
+    [22.7502, 70.9602],
+    [22.7498, 70.9602],
+    [22.7498, 70.9598],
+  ],
+};
+assert(
+  pointInsideFactoryPoint(22.75, 70.96, facPoly, 500, { gateMatchM: 0 }),
+  "GPS inside a factory outline matches the premises",
+);
+assert(
+  !pointInsideFactoryPoint(22.76, 70.97, facPoly, 500, { gateMatchM: 0 }),
+  "GPS far from a factory outline does not match",
+);
+
+const sekol = FACTORY_POINTS.find((p) => p.id === "fac-sekol-tiles-llp")!;
+const gtone = FACTORY_POINTS.find((p) => p.id === "fac-g-tone-tiles-llp")!;
+assert(
+  Boolean(sekol?.polygon) && (sekol.polygon?.length ?? 0) >= 4,
+  "SEKOL has a satellite premises outline",
+);
+assert(
+  Boolean(gtone?.polygon) && (gtone.polygon?.length ?? 0) >= 4,
+  "G TONE has a satellite premises outline",
+);
+assert(
+  pointInsideFactoryPoint(sekol.lat, sekol.lng, sekol, 500, {
+    gateMatchM: FACTORY_OUTLINE_GATE_M,
+  }),
+  "SEKOL pin matches its outlined premises",
+);
+assert(
+  pointInsideFactoryPoint(gtone.lat, gtone.lng, gtone, 500, {
+    gateMatchM: FACTORY_OUTLINE_GATE_M,
+  }),
+  "G TONE pin matches its outlined premises",
+);
+const outlinedN = FACTORY_POINTS.filter(
+  (p) => p.polygon && p.polygon.length >= 3,
+).length;
+assert(
+  outlinedN === FACTORY_POINTS.length,
+  `every factory uses a satellite outline (${outlinedN}/${FACTORY_POINTS.length})`,
+);
+assert(
+  FACTORY_POINTS.every((p) => (p.polygon?.length ?? 0) >= 3),
+  "no factory falls back to a circle",
 );
 
 const ioclParkPt = LOADING_POINTS.find((p) => p.id === "kandla-iocl-parking")!;
@@ -951,8 +1012,8 @@ const backEmpty = nextStatus({
   now: t0 + 80_000,
 });
 assert(
-  backEmpty.status === "PARK" && backEmpty.cargo === "EMPTY",
-  "filled at Mundra then IOCL parking → PARK empty",
+  backEmpty.status === "LOADED" && backEmpty.cargo === "LOADED",
+  "filled at Mundra then IOCL parking stays filled",
 );
 assert(
   samePortFacility(ioclParkPt, "Kandla IOCL Loading Point"),
@@ -970,8 +1031,8 @@ const inBoxPark = nextStatus({
   now: t0 + 80_000,
 });
 assert(
-  inBoxPark.status === "PARK" && inBoxPark.cargo === "EMPTY",
-  "inside IOCL parking box → PARK even after filling here",
+  inBoxPark.status === "LOADED" && inBoxPark.cargo === "LOADED",
+  "inside IOCL parking after filling here stays filled",
 );
 
 const ioclApronLat = 23.0353;
@@ -1001,8 +1062,31 @@ const ioclApron = nextStatus({
   speed: 0,
 });
 assert(
-  ioclApron.status === "ON_ROAD" && ioclApron.cargo === "EMPTY",
-  "stopped just outside IOCL parking → empty (not filled)",
+  ioclApron.status === "LOADED" && ioclApron.cargo === "LOADED",
+  "filled truck stopped just outside parking stays filled",
+);
+const ioclApronEmpty = nextStatus({
+  prev: {
+    status: "ON_ROAD",
+    geofenceId: null,
+    geofenceKind: null,
+    enteredAt: null,
+    outsideStreak: 0,
+    cargo: "EMPTY",
+    lastPark: ioclParkPt.name,
+  },
+  insideLoading: none,
+  insideParking: none,
+  insideFactory: none,
+  online: true,
+  now: t0 + 86_000,
+  lat: ioclApronLat,
+  lng: ioclApronLng,
+  speed: 0,
+});
+assert(
+  ioclApronEmpty.status === "ON_ROAD" && ioclApronEmpty.cargo === "EMPTY",
+  "empty truck stopped just outside parking stays empty",
 );
 
 const staleGps = nextStatus({
@@ -1036,6 +1120,23 @@ assert(
   canonicalParkingName("Kandla IOCL Parking Gate 1") === "Kandla IOCL Parking" &&
     canonicalParkingName("Kandla IOCL Parking 2") === "Kandla IOCL Parking",
   "retired IOCL Gate 1/2 labels map to the whole-yard parking name",
+);
+
+const dahejTrail = replayGpsTrail(
+  [
+    { lat: 21.6907, lng: 72.5395, speed: 0, atMs: t0 }, // parking
+    { lat: 21.6907, lng: 72.5395, speed: 0, atMs: t0 + 2_000 },
+    { lat: 21.69232, lng: 72.54044, speed: 2, atMs: t0 + 4_000 }, // load 2
+    { lat: 21.69232, lng: 72.54044, speed: 0, atMs: t0 + 6_000 },
+    { lat: 21.68988, lng: 72.54134, speed: 7, atMs: t0 + 8_000 },
+    { lat: 21.68988, lng: 72.54134, speed: 7, atMs: t0 + 10_000 },
+    { lat: 21.68988, lng: 72.54134, speed: 7, atMs: t0 + 12_000 },
+  ],
+  500,
+);
+assert(
+  dahejTrail.status === "LOADED" && dahejTrail.cargo === "LOADED",
+  "GPS history: Dahej park → load 2 → stand outside parking is filled",
 );
 
 if (fails) {

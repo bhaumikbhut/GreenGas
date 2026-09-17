@@ -1,6 +1,6 @@
 "use client";
 
-import { MapContainer, TileLayer, Circle, Marker, Polygon, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polygon, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { TruckSnapshot } from "@/app/api/trucks/route";
@@ -441,7 +441,7 @@ export default function TruckMap({
   trucks,
   loadingPoints,
   factoryPoints,
-  radiusM,
+  radiusM: _radiusM,
   selectedImei,
   focusToken = 0,
   mode = "fleet",
@@ -550,60 +550,37 @@ export default function TruckMap({
             </Polygon>
           );
         })}
-        {loadingPoints.map((p) => {
-        if (fenceOutline(p)) return null;
-        const isParking = p.kind === "parking";
-        const color = isParking ? statusColor("PARK") : statusColor("LOADING");
-        const r = p.radiusM > 0 ? p.radiusM : radiusM;
-        return (
-          <Circle
-            key={p.id}
-            center={[p.lat, p.lng]}
-            radius={r}
-            pathOptions={{
-              color,
-              fillColor: color,
-              fillOpacity: 0.12,
-              weight: 1,
-            }}
-          >
-            <Popup>
-              <strong>{p.name}</strong>
-              <br />
-              {isParking ? "Parking" : "Loading"} · {p.port}
-              <br />
-              Radius: {r} m
-            </Popup>
-          </Circle>
-        );
-      })}
-      {factoryPoints.map((p) => (
-        <Circle
-          key={p.id}
-          center={[p.lat, p.lng]}
-          radius={p.radiusM ?? radiusM}
-          pathOptions={{
-            color: statusColor("AT_FACTORY"),
-            fillColor: statusColor("AT_FACTORY"),
-            fillOpacity: 0.12,
-            weight: 1,
-          }}
-        >
-          <Popup>
-            <strong>{p.name}</strong>
-            <br />
-            Factory
-            {p.company ? (
-              <>
+        {factoryPoints.map((p) => {
+          const color = statusColor("AT_FACTORY");
+          const outline = fenceOutline(p);
+          if (!outline) return null;
+          return (
+            <Polygon
+              key={`fac-${p.id}`}
+              positions={outline}
+              pathOptions={{
+                color,
+                fillColor: color,
+                fillOpacity: 0.16,
+                weight: 2,
+              }}
+            >
+              <Popup>
+                <strong>{p.name}</strong>
                 <br />
-                {p.company}
-              </>
-            ) : null}
-            <br />
-            Radius: {p.radiusM ?? radiusM} m
-          </Popup>
-        </Circle>
-      ))}
+                Factory
+                {p.company ? (
+                  <>
+                    <br />
+                    {p.company}
+                  </>
+                ) : null}
+                <br />
+                {outline.length} corner outline
+              </Popup>
+            </Polygon>
+          );
+        })}
       {trucks.map((t) =>
         t.lat != null && t.lng != null ? (
           <MovingTruckMarker
