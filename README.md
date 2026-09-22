@@ -67,6 +67,8 @@ Create an app in [Meta for Developers](https://developers.facebook.com/), add Wh
 
 - **Local:** `npm run build && npm run start` → http://localhost:3000  
 - **Production:** https://green-gas-sigma.vercel.app  
+- **Shutdown:** Live site is soft-offline via `src/middleware.ts` (default on; set `SITE_SHUTDOWN=0` to restore). Cron jobs are disabled in `vercel.json`. Nothing was deleted.  
+
 - Health: `GET /api/health`  
 - Warm cache: `GET /api/cron/refresh-fleet` (set `CRON_SECRET`; Vercel Cron sends `Authorization: Bearer …`)  
 - Optional force live pull: `GET /api/trucks?live=1`  
